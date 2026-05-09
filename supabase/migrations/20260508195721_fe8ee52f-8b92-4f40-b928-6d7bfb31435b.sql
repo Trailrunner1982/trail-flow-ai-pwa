@@ -1,0 +1,1 @@
+ALTER TYPE workout_type ADD VALUE IF NOT EXISTS 'hike';
