@@ -19,8 +19,8 @@ export default defineConfig(({ mode }) => ({
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "apple-touch-icon.png"],
       manifest: {
-        name: "Trail Flow AI",
-        short_name: "TrailFlow",
+        name: "Trail Forge AI",
+        short_name: "Trail Forge",
         description: "A tua app de trail running com IA",
         theme_color: "#1a1a2e",
         background_color: "#ffffff",
