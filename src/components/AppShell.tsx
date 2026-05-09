@@ -10,6 +10,7 @@ import { LanguageToggle } from "./LanguageToggle";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { SubscriptionBanner } from "./SubscriptionBanner";
 import { FeedbackButton } from "./FeedbackButton";
+import { InstallPWA } from "./InstallPWA";
 import { useState } from "react";
 
 const NAV = [
@@ -81,72 +82,6 @@ export function AppShell() {
         </nav>
         <div className="flex items-center gap-2">
           <LanguageToggle />
+          <InstallPWA />
         </div>
-        <Button variant="ghost" size="sm" onClick={handleLogout} className="justify-start text-muted-foreground hover:text-destructive">
-          <LogOut className="w-4 h-4" /> {t("nav.logout")}
-        </Button>
-      </aside>
-
-      {/* Mobile top bar */}
-      <header className="lg:hidden flex items-center justify-between p-4 border-b border-border/60 bg-card/80 backdrop-blur-md sticky top-0 z-40">
-        <div className="flex items-center gap-2">
-          <Mountain className="w-6 h-6 text-primary" />
-          <span className="font-bold">Trail Forge</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <LanguageToggle />
-          {isAdmin && (
-            <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" title={t("nav.admin")}>
-                  <Menu className="w-5 h-5 text-primary" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="right" className="w-72 p-4">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground mb-3 mt-2">{t("nav.admin")}</div>
-                <div className="space-y-1">
-                  {ADMIN_NAV.map((item) => (
-                    <NavLink key={item.to} to={item.to} onClick={() => setMenuOpen(false)} className={({ isActive }) =>
-                      `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                        isActive ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}>
-                      <item.icon className="w-4 h-4" />
-                      {t(item.labelKey)}
-                    </NavLink>
-                  ))}
-                </div>
-              </SheetContent>
-            </Sheet>
-          )}
-          <Button variant="ghost" size="icon" onClick={handleLogout}>
-            <LogOut className="w-4 h-4" />
-          </Button>
-        </div>
-      </header>
-
-      {/* Main content */}
-      <main className="flex-1 pb-24 lg:pb-8">
-        <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-10">
-          <Outlet />
-        </div>
-      </main>
-
-      {/* Mobile bottom nav */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border/60 bg-card/95 backdrop-blur-lg">
-        <div className="grid grid-cols-6">
-          {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} className={({ isActive }) =>
-              `flex flex-col items-center justify-center gap-1 py-3 text-[10px] font-medium transition-colors ${
-                isActive ? "text-primary" : "text-muted-foreground"
-              }`}>
-              <item.icon className="w-5 h-5" />
-              {t(item.labelKey)}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
-      <FeedbackButton />
-      </div>
-    </div>
-  );
-}
+        <Butt
