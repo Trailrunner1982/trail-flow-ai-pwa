@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { MessageSquareWarning, Lightbulb, Palette, FileText, CheckCircle } from "lucide-react";
+import { MessageSquareWarning, Lightbulb, Palette, FileText, RefreshCw } from "lucide-react";
 
 interface FeedbackRow {
   id: string;
@@ -45,8 +45,8 @@ export default function AdminFeedback() {
   const load = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from("feedback")
-      .select("id, user_id, category, message, page_url, user_agent, status, created_at, profiles(full_name)")
+      .from("feedback_with_profiles")
+      .select("*")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -56,25 +56,17 @@ export default function AdminFeedback() {
       return;
     }
 
-    const mapped = (data || []).map((item: any) => ({
-      id: item.id,
-      user_id: item.user_id,
-      full_name: item.profiles?.full_name ?? null,
-      category: item.category,
-      message: item.message,
-      page_url: item.page_url,
-      user_agent: item.user_agent,
-      status: item.status,
-      created_at: item.created_at,
-    }));
-    setRows(mapped);
+    setRows((data || []) as FeedbackRow[]);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
   const updateStatus = async (id: string, status: string) => {
-    const { error } = await supabase.from("feedback").update({ status }).eq("id", id);
+    const { error } = await supabase
+      .from("feedback")
+      .update({ status })
+      .eq("id", id);
     if (error) return toast.error(error.message);
     toast.success("Estado atualizado");
     load();
@@ -96,11 +88,20 @@ export default function AdminFeedback() {
     }
   };
 
+  const newCount = rows.filter(r => r.status === "new").length;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Feedback dos Testers</h1>
-        <p className="text-muted-foreground text-sm mt-1">Todas as mensagens, bugs e sugestões enviados pelos atletas.</p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Feedback dos Atletas</h1>
+          <p className="text-muted-foreground text-sm mt-1">Todas as mensagens, bugs e sugestões enviados pelos atletas.</p>
+        </div>
+        {newCount > 0 && (
+          <Badge className="bg-primary text-white text-sm px-3 py-1">
+            {newCount} novo{newCount > 1 ? "s" : ""}
+          </Badge>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -129,7 +130,7 @@ export default function AdminFeedback() {
           </SelectContent>
         </Select>
         <Button variant="ghost" size="sm" onClick={load} className="ml-auto">
-          Actualizar
+          <RefreshCw className="w-4 h-4 mr-1" /> Atualizar
         </Button>
       </div>
 
@@ -142,7 +143,7 @@ export default function AdminFeedback() {
               <TableHead>Atleta</TableHead>
               <TableHead>Mensagem</TableHead>
               <TableHead className="w-[100px]">Página</TableHead>
-              <TableHead className="w-[110px]">Estado</TableHead>
+              <TableHead className="w-[140px]">Estado</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -152,7 +153,9 @@ export default function AdminFeedback() {
               </TableRow>
             ) : filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">Sem feedback nestes filtros.</TableCell>
+                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  {rows.length === 0 ? "Ainda não há feedback. Quando os atletas enviarem mensagens aparecem aqui." : "Sem feedback nestes filtros."}
+                </TableCell>
               </TableRow>
             ) : (
               filtered.map((row) => (
@@ -168,7 +171,7 @@ export default function AdminFeedback() {
                   </TableCell>
                   <TableCell>
                     <div className="text-sm font-medium">{row.full_name || "(sem nome)"}</div>
-                    <div className="text-[10px] text-muted-foreground font-mono">{row.user_id.slice(0, 8)}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">{row.user_id?.slice(0, 8)}</div>
                   </TableCell>
                   <TableCell>
                     <div className="text-sm max-w-[300px] whitespace-pre-wrap leading-relaxed">{row.message}</div>
