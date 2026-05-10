@@ -203,8 +203,28 @@ export default function AdminFeedback() {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-2">
-                      {statusBadge(row.status)}
-                      <Select value={row.status} onValueChange={(v) => updateStatus(row.id, v)}>
+  {statusBadge(row.status)}
+  <Select value={row.status} onValueChange={(v) => updateStatus(row.id, v)}>
+    <SelectTrigger className="h-7 text-xs w-full">
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="new">Novo</SelectItem>
+      <SelectItem value="in_progress">Em curso</SelectItem>
+      <SelectItem value="resolved">Resolvido</SelectItem>
+      <SelectItem value="wontfix">Nao aplicar</SelectItem>
+    </SelectContent>
+  </Select>
+  <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive h-7 text-xs"
+    onClick={async () => {
+      const { error } = await supabase.from("feedback").delete().eq("id", row.id);
+      if (error) return toast.error(error.message);
+      toast.success("Feedback apagado");
+      load();
+    }}>
+    Apagar
+  </Button>
+</div>
                         <SelectTrigger className="h-7 text-xs w-full">
                           <SelectValue />
                         </SelectTrigger>
