@@ -21,6 +21,7 @@ import {
   RefreshCw,
   ClipboardCheck,
   ArrowRight,
+  Settings2,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt, enUS } from "date-fns/locale";
@@ -35,6 +36,12 @@ interface FeedbackRow {
   reasoning: string;
   context_data: any;
   created_at: string;
+}
+
+interface ProfileConfig {
+  baseline_km_per_week: number | null;
+  baseline_avg_pace_sec_per_km: number | null;
+  available_run_days: number[] | null;
 }
 
 const verdictMeta: Record<Verdict, { key: string; color: string; icon: any }> = {
@@ -64,23 +71,40 @@ export default function CoachPage() {
   const [items, setItems] = useState<FeedbackRow[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [profileConfig, setProfileConfig] = useState<ProfileConfig | null>(null);
 
   const fetchAll = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("ai_feedback")
-      .select("*")
-      .eq("user_id", user.id)
-      .in("feedback_type", ALL_TYPES)
-      .order("created_at", { ascending: false })
-      .limit(200);
+
+    const [{ data: feedbackData, error }, { data: profileData }] = await Promise.all([
+      supabase
+        .from("ai_feedback")
+        .select("*")
+        .eq("user_id", user.id)
+        .in("feedback_type", ALL_TYPES)
+        .order("created_at", { ascending: false })
+        .limit(200),
+      supabase
+        .from("profiles")
+        .select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days")
+        .eq("id", user.id)
+        .maybeSingle(),
+    ]);
+
     if (error) toast.error(error.message);
-    setItems((data ?? []) as FeedbackRow[]);
+    setItems((feedbackData ?? []) as FeedbackRow[]);
+    setProfileConfig(profileData as ProfileConfig | null);
     setLoading(false);
   }, [user]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const trainingConfigured = !!(
+    profileConfig?.baseline_km_per_week &&
+    profileConfig?.baseline_avg_pace_sec_per_km &&
+    profileConfig?.available_run_days?.length
+  );
 
   const filtered = useMemo(() => {
     if (filter === "all") return items;
@@ -122,6 +146,26 @@ export default function CoachPage() {
         <p className="text-sm text-muted-foreground mt-1">{t("coach.subtitle")}</p>
       </div>
 
+      {/* Aviso se treino não configurado */}
+      {!trainingConfigured && (
+        <Card className="p-5 border-orange-500/30 bg-orange-500/5">
+          <div className="flex items-center gap-3 flex-wrap">
+            <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-orange-400">Treino não configurado</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Antes de usar o coach AI, configura os teus dados de treino no perfil — pace base, km semanais e dias disponíveis.
+              </p>
+            </div>
+            <Link to="/profile">
+              <Button size="sm" variant="outline">
+                <Settings2 className="w-3.5 h-3.5" /> Configurar treino <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          </div>
+        </Card>
+      )}
+
       {/* Como funciona */}
       <Card className="p-5 bg-gradient-to-br from-primary/10 via-background to-background border-primary/30 space-y-4">
         <div className="flex items-center gap-2">
@@ -129,21 +173,9 @@ export default function CoachPage() {
           <h2 className="text-base font-semibold">{t("coach.how.title")}</h2>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
-          <HowItem
-            icon={Sun}
-            title={t("coach.how.daily.title")}
-            desc={t("coach.how.daily.desc")}
-          />
-          <HowItem
-            icon={RefreshCw}
-            title={t("coach.how.adapt.title")}
-            desc={t("coach.how.adapt.desc")}
-          />
-          <HowItem
-            icon={ClipboardCheck}
-            title={t("coach.how.feedback.title")}
-            desc={t("coach.how.feedback.desc")}
-          />
+          <HowItem icon={Sun} title={t("coach.how.daily.title")} desc={t("coach.how.daily.desc")} />
+          <HowItem icon={RefreshCw} title={t("coach.how.adapt.title")} desc={t("coach.how.adapt.desc")} />
+          <HowItem icon={ClipboardCheck} title={t("coach.how.feedback.title")} desc={t("coach.how.feedback.desc")} />
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
           <Link to="/dashboard"><Button size="sm" variant="outline">Dashboard</Button></Link>
@@ -151,38 +183,47 @@ export default function CoachPage() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label={t("coach.dailyCount")} value={counts.daily} icon={Sun} />
-        <StatCard label={t("coach.adaptCount")} value={counts.adapt} icon={RefreshCw} />
-        <StatCard label={t("coach.quickAnalyses")} value={counts.quick} icon={Sparkles} />
-        <StatCard label={t("coach.deepAnalyses")} value={counts.deep} icon={Brain} />
-      </div>
+      {/* Só mostra o resto se o treino estiver configurado */}
+      {trainingConfigured ? (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label={t("coach.dailyCount")} value={counts.daily} icon={Sun} />
+            <StatCard label={t("coach.adaptCount")} value={counts.adapt} icon={RefreshCw} />
+            <StatCard label={t("coach.quickAnalyses")} value={counts.quick} icon={Sparkles} />
+            <StatCard label={t("coach.deepAnalyses")} value={counts.deep} icon={Brain} />
+          </div>
 
-      <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
-        <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="all">{t("coach.tab.all")}</TabsTrigger>
-          <TabsTrigger value="daily">{t("coach.tab.daily")}</TabsTrigger>
-          <TabsTrigger value="adapt">{t("coach.tab.adapt")}</TabsTrigger>
-          <TabsTrigger value="quick">{t("coach.tab.quick")}</TabsTrigger>
-          <TabsTrigger value="deep">{t("coach.tab.deep")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+          <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+            <TabsList className="flex-wrap h-auto">
+              <TabsTrigger value="all">{t("coach.tab.all")}</TabsTrigger>
+              <TabsTrigger value="daily">{t("coach.tab.daily")}</TabsTrigger>
+              <TabsTrigger value="adapt">{t("coach.tab.adapt")}</TabsTrigger>
+              <TabsTrigger value="quick">{t("coach.tab.quick")}</TabsTrigger>
+              <TabsTrigger value="deep">{t("coach.tab.deep")}</TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-      {filtered.length === 0 ? (
-        <Card className="p-8 text-center text-sm text-muted-foreground">{t("coach.empty")}</Card>
+          {filtered.length === 0 ? (
+            <Card className="p-8 text-center text-sm text-muted-foreground">{t("coach.empty")}</Card>
+          ) : (
+            <div className="space-y-3">
+              {filtered.map((row) => (
+                <FeedbackItem
+                  key={row.id}
+                  row={row}
+                  expanded={expanded.has(row.id)}
+                  onToggle={() => toggle(row.id)}
+                  onDelete={() => remove(row.id)}
+                  dateLocale={dateLocale}
+                />
+              ))}
+            </div>
+          )}
+        </>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((row) => (
-            <FeedbackItem
-              key={row.id}
-              row={row}
-              expanded={expanded.has(row.id)}
-              onToggle={() => toggle(row.id)}
-              onDelete={() => remove(row.id)}
-              dateLocale={dateLocale}
-            />
-          ))}
-        </div>
+        <Card className="p-8 text-center text-sm text-muted-foreground">
+          Configura o teu treino no perfil para começar a usar o coach AI.
+        </Card>
       )}
     </div>
   );
@@ -220,11 +261,7 @@ function typeMeta(t: (k: string) => string, type: string): { label: string; icon
 }
 
 function FeedbackItem({
-  row,
-  expanded,
-  onToggle,
-  onDelete,
-  dateLocale,
+  row, expanded, onToggle, onDelete, dateLocale,
 }: {
   row: FeedbackRow;
   expanded: boolean;
