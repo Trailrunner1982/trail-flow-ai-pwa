@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { MessageSquareWarning, Lightbulb, Palette, FileText, RefreshCw } from "lucide-react";
+import { MessageSquareWarning, Lightbulb, Palette, FileText, RefreshCw, Trash2 } from "lucide-react";
 
 interface FeedbackRow {
   id: string;
@@ -85,6 +85,16 @@ export default function AdminFeedback() {
     load();
   };
 
+  const deleteFeedback = async (id: string) => {
+    const { error } = await supabase
+      .from("feedback")
+      .delete()
+      .eq("id", id);
+    if (error) return toast.error(error.message);
+    toast.success("Feedback apagado");
+    load();
+  };
+
   const filtered = rows.filter((r) => {
     if (filterStatus !== "all" && r.status !== filterStatus) return false;
     if (filterCategory !== "all" && r.category !== filterCategory) return false;
@@ -156,7 +166,7 @@ export default function AdminFeedback() {
               <TableHead>Atleta</TableHead>
               <TableHead>Mensagem</TableHead>
               <TableHead className="w-[100px]">Pagina</TableHead>
-              <TableHead className="w-[140px]">Estado</TableHead>
+              <TableHead className="w-[160px]">Estado</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -203,28 +213,8 @@ export default function AdminFeedback() {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-2">
-  {statusBadge(row.status)}
-  <Select value={row.status} onValueChange={(v) => updateStatus(row.id, v)}>
-    <SelectTrigger className="h-7 text-xs w-full">
-      <SelectValue />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="new">Novo</SelectItem>
-      <SelectItem value="in_progress">Em curso</SelectItem>
-      <SelectItem value="resolved">Resolvido</SelectItem>
-      <SelectItem value="wontfix">Nao aplicar</SelectItem>
-    </SelectContent>
-  </Select>
-  <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive h-7 text-xs"
-    onClick={async () => {
-      const { error } = await supabase.from("feedback").delete().eq("id", row.id);
-      if (error) return toast.error(error.message);
-      toast.success("Feedback apagado");
-      load();
-    }}>
-    Apagar
-  </Button>
-</div>
+                      {statusBadge(row.status)}
+                      <Select value={row.status} onValueChange={(v) => updateStatus(row.id, v)}>
                         <SelectTrigger className="h-7 text-xs w-full">
                           <SelectValue />
                         </SelectTrigger>
@@ -235,6 +225,14 @@ export default function AdminFeedback() {
                           <SelectItem value="wontfix">Nao aplicar</SelectItem>
                         </SelectContent>
                       </Select>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive h-7 text-xs"
+                        onClick={() => deleteFeedback(row.id)}
+                      >
+                        <Trash2 className="w-3 h-3 mr-1" /> Apagar
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
