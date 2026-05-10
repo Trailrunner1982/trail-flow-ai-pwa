@@ -10,9 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { calculateBMI, calculateMetabolicAge, calculateZones } from "@/lib/training";
 import { fmtPace } from "@/lib/format";
-import { User, Heart, Activity, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2 } from "lucide-react";
+import { User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2 } from "lucide-react";
 import { toast } from "sonner";
-import { differenceInYears, format, parseISO, subDays } from "date-fns";
+import { differenceInYears, format, subDays } from "date-fns";
 import { useLanguage } from "@/lib/i18n";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -54,6 +54,26 @@ function Tooltip2({ text }: { text: string }) {
   );
 }
 
+// Converte "5:30" → 330 segundos
+function paceInputToSec(val: string): number | null {
+  if (!val) return null;
+  if (val.includes(":")) {
+    const [m, s] = val.split(":").map(Number);
+    if (isNaN(m) || isNaN(s)) return null;
+    return m * 60 + s;
+  }
+  const n = Number(val);
+  return isNaN(n) ? null : n;
+}
+
+// Converte 330 segundos → "5:30"
+function secToPaceInput(sec: number | null): string {
+  if (!sec) return "";
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export default function ProfilePage() {
   const { userId, selfId, canWrite } = useEffectiveUser();
   const { t } = useLanguage();
@@ -67,6 +87,7 @@ export default function ProfilePage() {
   const [editingTraining, setEditingTraining] = useState(false);
   const [weightHistory, setWeightHistory] = useState<WeightEntry[]>([]);
   const [newWeight, setNewWeight] = useState("");
+  const [paceInput, setPaceInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<Profile>({
     full_name: "", date_of_birth: null, weight_kg: null, height_cm: null,
@@ -85,19 +106,21 @@ export default function ProfilePage() {
     if (!userId) return;
     setLoading(true);
     const { data } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
-    if (data) setForm({
-      full_name: data.full_name, date_of_birth: data.date_of_birth,
-      weight_kg: data.weight_kg, height_cm: data.height_cm,
-      max_hr: data.max_hr, resting_hr: data.resting_hr, vo2_max: data.vo2_max,
-      baseline_avg_pace_sec_per_km: data.baseline_avg_pace_sec_per_km,
-      baseline_km_per_week: data.baseline_km_per_week,
-      available_run_days: data.available_run_days ?? [1,2,3,4,5,6],
-      available_strength_days: data.available_strength_days ?? [2,4],
-      long_run_day: data.long_run_day ?? 6,
-      avatar_url: (data as any).avatar_url ?? null,
-    });
+    if (data) {
+      setForm({
+        full_name: data.full_name, date_of_birth: data.date_of_birth,
+        weight_kg: data.weight_kg, height_cm: data.height_cm,
+        max_hr: data.max_hr, resting_hr: data.resting_hr, vo2_max: data.vo2_max,
+        baseline_avg_pace_sec_per_km: data.baseline_avg_pace_sec_per_km,
+        baseline_km_per_week: data.baseline_km_per_week,
+        available_run_days: data.available_run_days ?? [1,2,3,4,5,6],
+        available_strength_days: data.available_strength_days ?? [2,4],
+        long_run_day: data.long_run_day ?? 6,
+        avatar_url: (data as any).avatar_url ?? null,
+      });
+      setPaceInput(secToPaceInput(data.baseline_avg_pace_sec_per_km));
+    }
 
-    // Carregar histórico de peso dos últimos 90 dias
     const since = format(subDays(new Date(), 90), "yyyy-MM-dd");
     const { data: wData } = await supabase
       .from("daily_biometrics")
@@ -120,9 +143,9 @@ export default function ProfilePage() {
     if (!canWrite) return toast.error(t("common.readonly"));
     setSaving(true);
     const currentWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight_kg : form.weight_kg;
-const bmi = currentWeight && form.height_cm ? calculateBMI(currentWeight, form.height_cm) : null;
+    const bmi = currentWeight && form.height_cm ? calculateBMI(currentWeight, form.height_cm) : null;
     const age = form.date_of_birth ? differenceInYears(new Date(), new Date(form.date_of_birth)) : null;
-const metabolicAge = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi) : null;
+    const metabolic_age = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi) : null;
     const { error } = await supabase.from("profiles").update({ ...form, metabolic_age }).eq("id", userId);
     if (form.max_hr && form.resting_hr && form.baseline_avg_pace_sec_per_km) {
       const z = calculateZones(form.max_hr, form.resting_hr, form.baseline_avg_pace_sec_per_km);
@@ -208,7 +231,9 @@ const metabolicAge = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi)
 
   if (loading) return <LoadingScreen />;
 
-  const bmi = form.weight_kg && form.height_cm ? calculateBMI(form.weight_kg, form.height_cm) : null;
+  // IMC usa o peso mais recente do histórico
+  const currentWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight_kg : form.weight_kg;
+  const bmi = currentWeight && form.height_cm ? calculateBMI(currentWeight, form.height_cm) : null;
   const age = form.date_of_birth ? differenceInYears(new Date(), new Date(form.date_of_birth)) : null;
   const metabolicAge = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi) : null;
   const zones = (form.max_hr && form.resting_hr && form.baseline_avg_pace_sec_per_km)
@@ -223,7 +248,7 @@ const metabolicAge = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi)
 
   const firstWeight = weightHistory[0]?.weight_kg;
   const lastWeight = weightHistory[weightHistory.length - 1]?.weight_kg;
-  const weightDelta = firstWeight && lastWeight ? (lastWeight - firstWeight).toFixed(1) : null;
+  const weightDelta = firstWeight && lastWeight && firstWeight !== lastWeight ? (lastWeight - firstWeight).toFixed(1) : null;
 
   const trainingConfigured = !!(
     form.baseline_km_per_week &&
@@ -249,7 +274,7 @@ const metabolicAge = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi)
         <div className="flex-1 min-w-[180px]">
           <div className="font-semibold text-lg">{form.full_name || t("profile.noName")}</div>
           {age && <div className="text-sm text-muted-foreground">{age} anos</div>}
-          {form.weight_kg && <div className="text-sm text-muted-foreground">{form.weight_kg} kg · {form.height_cm} cm</div>}
+          {currentWeight && <div className="text-sm text-muted-foreground">{currentWeight} kg · {form.height_cm} cm</div>}
           <p className="text-xs text-muted-foreground mt-1">{t("profile.photoHint")}</p>
         </div>
         <div className="flex flex-col gap-2">
@@ -276,7 +301,7 @@ const metabolicAge = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi)
           tooltip="VO2max: capacidade aeróbica máxima em ml/kg/min. Acima de 50 é muito bom para atletas de trail." />
       </div>
 
-      {/* Form de perfil — só visível quando editingProfile */}
+      {/* Form de perfil */}
       {editingProfile && (
         <Card className="p-5 space-y-5">
           <h3 className="text-sm font-semibold">Dados pessoais</h3>
@@ -386,11 +411,20 @@ const metabolicAge = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi)
         {editingTraining && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Pace base (seg/km)">
-                <Input type="number" inputMode="numeric" value={form.baseline_avg_pace_sec_per_km ?? ""}
-                  onChange={(e) => setForm({ ...form, baseline_avg_pace_sec_per_km: num(e.target.value) })} placeholder="ex: 330 = 5:30/km" />
+              <Field label="Pace base (min/km)">
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="ex: 5:30"
+                  value={paceInput}
+                  onChange={(e) => {
+                    setPaceInput(e.target.value);
+                    const sec = paceInputToSec(e.target.value);
+                    setForm({ ...form, baseline_avg_pace_sec_per_km: sec });
+                  }}
+                />
                 {form.baseline_avg_pace_sec_per_km && (
-                  <p className="text-xs text-muted-foreground mt-1">= {fmtPace(form.baseline_avg_pace_sec_per_km)} min/km</p>
+                  <p className="text-xs text-muted-foreground mt-1">= {form.baseline_avg_pace_sec_per_km} seg/km</p>
                 )}
               </Field>
               <Field label="Km semanais">
