@@ -119,9 +119,10 @@ export default function ProfilePage() {
     if (!userId) return;
     if (!canWrite) return toast.error(t("common.readonly"));
     setSaving(true);
-    const bmi = form.weight_kg && form.height_cm ? calculateBMI(form.weight_kg, form.height_cm) : null;
+    const currentWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight_kg : form.weight_kg;
+const bmi = currentWeight && form.height_cm ? calculateBMI(currentWeight, form.height_cm) : null;
     const age = form.date_of_birth ? differenceInYears(new Date(), new Date(form.date_of_birth)) : null;
-    const metabolic_age = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi) : null;
+const metabolicAge = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi) : null;
     const { error } = await supabase.from("profiles").update({ ...form, metabolic_age }).eq("id", userId);
     if (form.max_hr && form.resting_hr && form.baseline_avg_pace_sec_per_km) {
       const z = calculateZones(form.max_hr, form.resting_hr, form.baseline_avg_pace_sec_per_km);
