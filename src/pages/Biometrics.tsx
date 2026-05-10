@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
-import { HeartPulse, Moon, Activity, Battery, Save, Loader2 } from "lucide-react";
+import { HeartPulse, Moon, Activity, Battery, Save, Loader2, HelpCircle } from "lucide-react";
 import { format, parseISO, subDays } from "date-fns";
 import { pt, enUS } from "date-fns/locale";
 import { toast } from "sonner";
@@ -22,13 +22,11 @@ interface Bio {
   hrv: number | null;
   stress_level: number | null;
   body_battery: number | null;
-  garmin_readiness: number | null;
   resting_hr: number | null;
   energy_level: number | null;
   soreness_score: number | null;
   soreness_zones: string[] | null;
   mood: number | null;
-  weight_kg: number | null;
   notes: string | null;
 }
 
@@ -37,6 +35,22 @@ export const SORENESS_ZONES = [
 ] as const;
 
 const today = () => format(new Date(), "yyyy-MM-dd");
+
+function TooltipHelp({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex items-center">
+      <button type="button" onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-primary ml-1">
+        <HelpCircle className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <span className="absolute z-50 left-5 top-0 w-52 rounded-md bg-popover border border-border text-xs text-popover-foreground shadow-md p-2">
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function BiometricsPage() {
   const { userId, canWrite } = useEffectiveUser();
@@ -52,13 +66,11 @@ export default function BiometricsPage() {
     hrv: null,
     stress_level: 30,
     body_battery: null,
-    garmin_readiness: null,
     resting_hr: null,
     energy_level: 7,
     soreness_score: 0,
     soreness_zones: [],
     mood: 3,
-    weight_kg: null,
     notes: "",
   });
 
@@ -82,11 +94,11 @@ export default function BiometricsPage() {
     if (existing) {
       setForm(existing);
     } else {
-    setForm({
+      setForm({
         measurement_date: date,
         sleep_score: 75, hrv: null, stress_level: 30, body_battery: null,
-        garmin_readiness: null, resting_hr: null, energy_level: 7,
-        soreness_score: 0, soreness_zones: [], mood: 3, weight_kg: null,
+        resting_hr: null, energy_level: 7,
+        soreness_score: 0, soreness_zones: [], mood: 3,
         notes: "",
       });
     }
@@ -103,13 +115,11 @@ export default function BiometricsPage() {
       hrv: form.hrv,
       stress_level: form.stress_level,
       body_battery: form.body_battery,
-      garmin_readiness: form.garmin_readiness,
       resting_hr: form.resting_hr,
       energy_level: form.energy_level,
       soreness_score: form.soreness_score,
       soreness_zones: form.soreness_zones?.length ? form.soreness_zones : null,
       mood: form.mood,
-      weight_kg: form.weight_kg,
       notes: form.notes || null,
     };
     const existing = history.find((h) => h.measurement_date === form.measurement_date);
@@ -149,15 +159,40 @@ export default function BiometricsPage() {
           </div>
           {readiness !== null && (
             <div className="text-right">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t("dash.readiness")}</div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center justify-end gap-1">
+                {t("dash.readiness")}
+                <TooltipHelp text="Prontidão calculada com base no sono, stress, dores musculares e humor. 75+ = ótimo, 55-74 = bom, 35-54 = moderado, abaixo = descanso recomendado." />
+              </div>
               <div className={`text-2xl font-bold ${readinessColor(readiness)}`}>{readiness}</div>
             </div>
           )}
         </div>
 
-        <SliderField icon={Moon} label={t("bio.sleep")} hint={t("bio.sleepHint")} value={form.sleep_score ?? 0} onChange={(v) => setForm({ ...form, sleep_score: v })} />
-        <SliderField icon={Activity} label={t("bio.stress")} hint={t("bio.stressHint")} value={form.stress_level ?? 0} onChange={(v) => setForm({ ...form, stress_level: v })} />
-        <SliderField icon={Activity} label={t("bio.soreness")} hint={t("bio.sorenessHint")} max={10} value={form.soreness_score ?? 0} onChange={(v) => setForm({ ...form, soreness_score: v })} />
+        <SliderField
+          icon={Moon}
+          label={t("bio.sleep")}
+          hint={t("bio.sleepHint")}
+          tooltip="Qualidade do sono de 0 a 100. Inclui duração, fases e recuperação. Valores acima de 70 indicam boa recuperação."
+          value={form.sleep_score ?? 0}
+          onChange={(v) => setForm({ ...form, sleep_score: v })}
+        />
+        <SliderField
+          icon={Activity}
+          label={t("bio.stress")}
+          hint={t("bio.stressHint")}
+          tooltip="Nível de stress de 0 a 100. Valores abaixo de 40 são ideais para treinar. Acima de 70 considera reduzir a intensidade."
+          value={form.stress_level ?? 0}
+          onChange={(v) => setForm({ ...form, stress_level: v })}
+        />
+        <SliderField
+          icon={Activity}
+          label={t("bio.soreness")}
+          hint={t("bio.sorenessHint")}
+          tooltip="Dor muscular de 0 a 10. Acima de 5 o coach pode adaptar o treino. Acima de 7 recomenda-se descanso ativo."
+          max={10}
+          value={form.soreness_score ?? 0}
+          onChange={(v) => setForm({ ...form, soreness_score: v })}
+        />
 
         {(form.soreness_score ?? 0) > 0 && (
           <div className="space-y-2">
@@ -184,17 +219,46 @@ export default function BiometricsPage() {
           </div>
         )}
 
-        <SliderField icon={HeartPulse} label={t("bio.mood")} hint={t("bio.moodHint")} max={5} value={form.mood ?? 3} onChange={(v) => setForm({ ...form, mood: v })} />
+        <SliderField
+          icon={HeartPulse}
+          label={t("bio.mood")}
+          hint={t("bio.moodHint")}
+          tooltip="Humor de 1 (muito mau) a 5 (excelente). Influencia o cálculo da prontidão e as recomendações do coach."
+          max={5}
+          value={form.mood ?? 3}
+          onChange={(v) => setForm({ ...form, mood: v })}
+        />
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <NumField label={t("bio.hrv")} icon={HeartPulse} value={form.hrv} onChange={(v) => setForm({ ...form, hrv: v })} />
-          <NumField label={t("bio.restHr")} icon={HeartPulse} value={form.resting_hr} onChange={(v) => setForm({ ...form, resting_hr: v })} />
-          <NumField label={t("bio.battery")} icon={Battery} value={form.body_battery} onChange={(v) => setForm({ ...form, body_battery: v })} />
-          <NumField label={t("bio.energy")} icon={Battery} value={form.energy_level} onChange={(v) => setForm({ ...form, energy_level: v })} />
+        <div className="grid grid-cols-2 sm:grid-cols-2 gap-3">
+          <NumField
+            label={t("bio.hrv")}
+            icon={HeartPulse}
+            value={form.hrv}
+            onChange={(v) => setForm({ ...form, hrv: v })}
+            tooltip="Variabilidade da frequência cardíaca em ms. Valores mais altos indicam melhor recuperação. Compara sempre com a tua baseline pessoal."
+          />
+          <NumField
+            label={t("bio.restHr")}
+            icon={HeartPulse}
+            value={form.resting_hr}
+            onChange={(v) => setForm({ ...form, resting_hr: v })}
+            tooltip="FC em repouso ao acordar. Valores elevados (>5 bpm acima da tua média) podem indicar fadiga ou início de doença."
+          />
+          <NumField
+            label={t("bio.battery")}
+            icon={Battery}
+            value={form.body_battery}
+            onChange={(v) => setForm({ ...form, body_battery: v })}
+            tooltip="Body Battery (Garmin) de 0 a 100. Indica a energia disponível para o dia. Abaixo de 30 recomenda-se treino leve."
+          />
+          <NumField
+            label={t("bio.energy")}
+            icon={Battery}
+            value={form.energy_level}
+            onChange={(v) => setForm({ ...form, energy_level: v })}
+            tooltip="A tua perceção subjetiva de energia de 1 a 10. Complementa os dados objetivos do sensor."
+          />
         </div>
-        <p className="text-[11px] text-muted-foreground -mt-2">
-          O peso passou para o teu Perfil. Atualiza-o lá quando quiseres acompanhar a evolução.
-        </p>
 
         <div>
           <Label className="text-xs">{t("common.notes")} ({t("common.optional")})</Label>
@@ -243,13 +307,14 @@ export default function BiometricsPage() {
 }
 
 function SliderField({
-  icon: Icon, label, hint, value, onChange, max = 100,
-}: { icon: any; label: string; hint: string; value: number; onChange: (v: number) => void; max?: number }) {
+  icon: Icon, label, hint, tooltip, value, onChange, max = 100,
+}: { icon: any; label: string; hint: string; tooltip?: string; value: number; onChange: (v: number) => void; max?: number }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className="text-xs flex items-center gap-1.5">
           <Icon className="w-3.5 h-3.5 text-primary" /> {label}
+          {tooltip && <TooltipHelp text={tooltip} />}
         </Label>
         <Badge variant="secondary">{value}</Badge>
       </div>
@@ -260,12 +325,13 @@ function SliderField({
 }
 
 function NumField({
-  label, icon: Icon, value, onChange, step,
-}: { label: string; icon: any; value: number | null; onChange: (v: number | null) => void; step?: string }) {
+  label, icon: Icon, value, onChange, step, tooltip,
+}: { label: string; icon: any; value: number | null; onChange: (v: number | null) => void; step?: string; tooltip?: string }) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs flex items-center gap-1.5">
         <Icon className="w-3.5 h-3.5 text-primary" /> {label}
+        {tooltip && <TooltipHelp text={tooltip} />}
       </Label>
       <Input
         type="number"
@@ -278,8 +344,7 @@ function NumField({
   );
 }
 
-export function computeReadiness(b: Partial<Pick<Bio, "sleep_score" | "stress_level" | "hrv" | "garmin_readiness" | "soreness_score" | "mood">>): number | null {
-  if (b.garmin_readiness != null) return b.garmin_readiness;
+export function computeReadiness(b: Partial<Pick<Bio, "sleep_score" | "stress_level" | "soreness_score" | "mood">>): number | null {
   const sleep = b.sleep_score ?? null;
   const stress = b.stress_level ?? null;
   if (sleep == null && stress == null) return null;
@@ -288,10 +353,9 @@ export function computeReadiness(b: Partial<Pick<Bio, "sleep_score" | "stress_le
   if (sleep != null) { score += sleep * 0.6; weight += 0.6; }
   if (stress != null) { score += (100 - stress) * 0.4; weight += 0.4; }
   let r = score / weight;
-  // Modificadores
   if (b.soreness_score != null && b.soreness_score >= 7) r -= 15;
   else if (b.soreness_score != null && b.soreness_score >= 5) r -= 8;
-  if (b.mood != null) r += (b.mood - 3) * 3; // 1→-6, 5→+6
+  if (b.mood != null) r += (b.mood - 3) * 3;
   return Math.max(0, Math.min(100, Math.round(r)));
 }
 
