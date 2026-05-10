@@ -31,7 +31,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 
 const CATEGORY_LABELS: Record<string, string> = {
   bug: "Bug",
-  suggestion: "Sugestão",
+  suggestion: "Sugestao",
   ux: "UX",
   other: "Outro",
 };
@@ -44,8 +44,9 @@ export default function AdminFeedback() {
 
   const load = async () => {
     setLoading(true);
+
     const { data, error } = await supabase
-      .from("feedback_with_profiles")
+      .from("feedback")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(200);
@@ -56,7 +57,19 @@ export default function AdminFeedback() {
       return;
     }
 
-    setRows((data || []) as FeedbackRow[]);
+    const userIds = [...new Set((data || []).map((r: any) => r.user_id))];
+    const { data: profiles } = userIds.length > 0
+      ? await supabase.from("profiles").select("id, full_name").in("id", userIds)
+      : { data: [] };
+
+    const profileMap = Object.fromEntries((profiles || []).map((p: any) => [p.id, p.full_name]));
+
+    const mapped = (data || []).map((item: any) => ({
+      ...item,
+      full_name: profileMap[item.user_id] ?? null,
+    }));
+
+    setRows(mapped as FeedbackRow[]);
     setLoading(false);
   };
 
@@ -83,7 +96,7 @@ export default function AdminFeedback() {
       case "new": return <Badge variant="outline" className="border-primary/30 text-primary">Novo</Badge>;
       case "in_progress": return <Badge variant="outline" className="border-amber-500/30 text-amber-600 dark:text-amber-400">Em curso</Badge>;
       case "resolved": return <Badge variant="outline" className="border-emerald-500/30 text-emerald-600 dark:text-emerald-400">Resolvido</Badge>;
-      case "wontfix": return <Badge variant="outline" className="border-muted text-muted-foreground">Não aplicar</Badge>;
+      case "wontfix": return <Badge variant="outline" className="border-muted text-muted-foreground">Nao aplicar</Badge>;
       default: return <Badge variant="outline">{status}</Badge>;
     }
   };
@@ -95,7 +108,7 @@ export default function AdminFeedback() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Feedback dos Atletas</h1>
-          <p className="text-muted-foreground text-sm mt-1">Todas as mensagens, bugs e sugestões enviados pelos atletas.</p>
+          <p className="text-muted-foreground text-sm mt-1">Todas as mensagens, bugs e sugestoes enviados pelos atletas.</p>
         </div>
         {newCount > 0 && (
           <Badge className="bg-primary text-white text-sm px-3 py-1">
@@ -112,7 +125,7 @@ export default function AdminFeedback() {
           <SelectContent>
             <SelectItem value="all">Todas categorias</SelectItem>
             <SelectItem value="bug">Bug</SelectItem>
-            <SelectItem value="suggestion">Sugestão</SelectItem>
+            <SelectItem value="suggestion">Sugestao</SelectItem>
             <SelectItem value="ux">UX</SelectItem>
             <SelectItem value="other">Outro</SelectItem>
           </SelectContent>
@@ -126,7 +139,7 @@ export default function AdminFeedback() {
             <SelectItem value="new">Novo</SelectItem>
             <SelectItem value="in_progress">Em curso</SelectItem>
             <SelectItem value="resolved">Resolvido</SelectItem>
-            <SelectItem value="wontfix">Não aplicar</SelectItem>
+            <SelectItem value="wontfix">Nao aplicar</SelectItem>
           </SelectContent>
         </Select>
         <Button variant="ghost" size="sm" onClick={load} className="ml-auto">
@@ -142,7 +155,7 @@ export default function AdminFeedback() {
               <TableHead className="w-[100px]">Categoria</TableHead>
               <TableHead>Atleta</TableHead>
               <TableHead>Mensagem</TableHead>
-              <TableHead className="w-[100px]">Página</TableHead>
+              <TableHead className="w-[100px]">Pagina</TableHead>
               <TableHead className="w-[140px]">Estado</TableHead>
             </TableRow>
           </TableHeader>
@@ -154,7 +167,7 @@ export default function AdminFeedback() {
             ) : filtered.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                  {rows.length === 0 ? "Ainda não há feedback. Quando os atletas enviarem mensagens aparecem aqui." : "Sem feedback nestes filtros."}
+                  {rows.length === 0 ? "Ainda nao ha feedback. Quando os atletas enviarem mensagens aparecem aqui." : "Sem feedback nestes filtros."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -199,7 +212,7 @@ export default function AdminFeedback() {
                           <SelectItem value="new">Novo</SelectItem>
                           <SelectItem value="in_progress">Em curso</SelectItem>
                           <SelectItem value="resolved">Resolvido</SelectItem>
-                          <SelectItem value="wontfix">Não aplicar</SelectItem>
+                          <SelectItem value="wontfix">Nao aplicar</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
