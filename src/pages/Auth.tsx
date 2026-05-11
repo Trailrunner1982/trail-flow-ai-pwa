@@ -52,6 +52,22 @@ export default function AuthPage() {
           password: result.data.password,
         });
         if (error) throw error;
+
+        // Verificar se tem de mudar a password
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (currentUser) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("must_change_password")
+            .eq("id", currentUser.id)
+            .maybeSingle();
+
+          if (profile?.must_change_password) {
+            navigate("/reset-password?force=true");
+            return;
+          }
+        }
+
         toast.success("Bem-vindo de volta!");
         navigate("/dashboard");
       }
@@ -71,7 +87,6 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
-      {/* Hero — visible on lg+ */}
       <aside className="hidden lg:flex relative overflow-hidden">
         <img
           src={heroImg}
@@ -96,7 +111,6 @@ export default function AuthPage() {
         </div>
       </aside>
 
-      {/* Form */}
       <main className="flex items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8 animate-fade-in">
           <div className="lg:hidden flex items-center gap-2 text-primary">
@@ -120,11 +134,14 @@ export default function AuthPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="atleta@trail.com" />
+              <Input id="email" type="email" autoComplete="email" required value={email}
+                onChange={(e) => setEmail(e.target.value)} placeholder="atleta@trail.com" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" autoComplete={tab === "login" ? "current-password" : "new-password"} required value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} />
+              <Input id="password" type="password"
+                autoComplete={tab === "login" ? "current-password" : "new-password"}
+                required value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} />
             </div>
             <Button type="submit" disabled={submitting} variant="hero" size="lg" className="w-full">
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
