@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Mountain, LayoutDashboard, Flag, HeartPulse, Calendar, Brain, LogOut, FlaskConical, Users, Library, User, Inbox, Dumbbell, Menu } from "lucide-react";
+import { Mountain, LayoutDashboard, Flag, HeartPulse, Calendar, Brain, LogOut, Users, Library, User, Inbox, Dumbbell, Menu } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -38,7 +38,6 @@ export function AppShell() {
     { to: "/admin/users", labelKey: "nav.athletes", icon: Users },
     { to: "/admin/content", labelKey: "nav.library", icon: Library },
     { to: "/admin/feedback", labelKey: "nav.feedback", icon: Inbox },
-    { to: "/admin/simulator", labelKey: "nav.simulator", icon: FlaskConical },
   ];
 
   return (
