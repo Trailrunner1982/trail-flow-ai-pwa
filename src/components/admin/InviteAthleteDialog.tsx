@@ -17,6 +17,8 @@ interface Props {
   onInvited: () => void;
 }
 
+const DEFAULT_PASSWORD = "TrailForge2026!";
+
 export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
@@ -28,29 +30,47 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
   const submit = async () => {
     if (!email.trim()) return toast.error("Email obrigatório");
     setLoading(true);
-    const { data, error } = await supabase.functions.invoke("invite-athlete", {
-      body: {
+    try {
+      // 1. Criar utilizador com password default
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: email.trim(),
-        full_name: fullName.trim(),
-        subscription_end_date: endDate ? format(endDate, "yyyy-MM-dd") : null,
-        redirect_to: `${window.location.origin}/reset-password`,
-      },
-    });
-    setLoading(false);
-    if (error || (data as any)?.error) {
-      return toast.error((data as any)?.error || error?.message || "Falha ao convidar");
+        password: DEFAULT_PASSWORD,
+        options: {
+          data: { full_name: fullName.trim() || null },
+        },
+      });
+
+      if (signUpError) throw signUpError;
+      if (!signUpData.user) throw new Error("Erro ao criar utilizador");
+
+      const userId = signUpData.user.id;
+
+      // 2. Atualizar perfil com nome e data de subscrição
+      if (fullName.trim() || endDate) {
+        await supabase.from("profiles").upsert({
+          id: userId,
+          full_name: fullName.trim() || null,
+          subscription_end_date: endDate ? format(endDate, "yyyy-MM-dd") : null,
+          must_change_password: true,
+        });
+      }
+
+      toast.success(`Atleta criado! Email: ${email} · Password: ${DEFAULT_PASSWORD}`);
+      reset();
+      onOpenChange(false);
+      onInvited();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Erro ao criar atleta");
+    } finally {
+      setLoading(false);
     }
-    toast.success(`Convite enviado para ${email}`);
-    reset();
-    onOpenChange(false);
-    onInvited();
   };
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Convidar atleta</DialogTitle>
+          <DialogTitle>Criar atleta</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -75,15 +95,18 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
               </PopoverContent>
             </Popover>
           </div>
-          <p className="text-xs text-muted-foreground">
-            O atleta recebe um email com um link para definir password e entrar na app.
-          </p>
+          <div className="rounded-lg bg-muted/50 border border-border p-3 text-xs space-y-1">
+            <p className="font-medium">Como funciona:</p>
+            <p>1. O atleta é criado com a password <code className="bg-muted px-1 rounded">TrailForge2026!</code></p>
+            <p>2. Na primeira entrada é obrigado a mudar a password</p>
+            <p>3. Envia-lhe o email e a password manualmente</p>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Cancelar</Button>
           <Button onClick={submit} disabled={loading}>
             {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Enviar convite
+            Criar atleta
           </Button>
         </DialogFooter>
       </DialogContent>
