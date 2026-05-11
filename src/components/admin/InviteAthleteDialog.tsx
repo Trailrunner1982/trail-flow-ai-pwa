@@ -29,6 +29,9 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
     if (!email.trim()) return toast.error("Email obrigatório");
     setLoading(true);
     try {
+      // Guardar sessão do admin antes
+      const { data: { session: adminSession } } = await supabase.auth.getSession();
+
       const { data, error } = await supabase.functions.invoke("invite-athlete", {
         body: {
           email: email.trim(),
@@ -37,6 +40,14 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
           redirect_to: `${window.location.origin}/reset-password`,
         },
       });
+
+      // Restaurar sessão do admin imediatamente
+      if (adminSession) {
+        await supabase.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token,
+        });
+      }
 
       if (error || (data as any)?.error) {
         throw new Error((data as any)?.error || error?.message || "Falha ao convidar");
