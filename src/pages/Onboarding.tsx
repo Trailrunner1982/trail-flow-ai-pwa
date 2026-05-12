@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { z } from "zod";
 import { Loader2, Mountain, ChevronRight, ChevronLeft, LayoutDashboard, Calendar, Brain, Flag, HelpCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,13 +11,16 @@ import { fmtPace } from "@/lib/format";
 
 function paceInputToSec(val: string): number | null {
   if (!val) return null;
-  if (val.includes(":")) {
-    const [m, s] = val.split(":").map(Number);
-    if (isNaN(m) || isNaN(s)) return null;
-    return m * 60 + s;
-  }
-  const n = Number(val);
-  return isNaN(n) ? null : n;
+  // Só aceita formato min:seg
+  if (!val.includes(":")) return null;
+  const parts = val.split(":");
+  if (parts.length !== 2) return null;
+  const m = parseInt(parts[0]);
+  const s = parseInt(parts[1]);
+  if (isNaN(m) || isNaN(s)) return null;
+  if (s < 0 || s > 59) return null;
+  if (m < 2 || m > 15) return null;
+  return m * 60 + s;
 }
 
 const DAYS = [
@@ -31,14 +33,12 @@ export default function Onboarding() {
   const { user, loading: authLoading } = useAuth();
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [paceError, setPaceError] = useState("");
 
-  // Passo 1 — Dados pessoais
   const [fullName, setFullName] = useState("");
   const [dob, setDob] = useState("");
   const [weight, setWeight] = useState("");
   const [height, setHeight] = useState("");
-
-  // Passo 2 — Configuração de treino
   const [kmPerWeek, setKmPerWeek] = useState("");
   const [paceInput, setPaceInput] = useState("");
   const [runDays, setRunDays] = useState<number[]>([1, 2, 3, 4, 5, 6]);
@@ -64,16 +64,32 @@ export default function Onboarding() {
     }
   };
 
+  const handlePaceChange = (val: string) => {
+    setPaceInput(val);
+    setPaceError("");
+    if (val && !val.includes(":")) {
+      setPaceError("Usa o formato min:seg — ex: 5:30");
+    } else if (val && val.includes(":")) {
+      const sec = paceInputToSec(val);
+      if (sec === null) {
+        setPaceError("Pace inválido — ex: 5:30 (entre 2:00 e 15:00)");
+      }
+    }
+  };
+
   const next = () => {
     if (step === 1) {
       if (!fullName.trim() || fullName.trim().length < 2) { toast.error("Indica o teu nome completo"); return; }
       if (!dob) { toast.error("Indica a tua data de nascimento"); return; }
-      if (!weight || parseFloat(weight) < 30) { toast.error("Indica o teu peso"); return; }
-      if (!height || parseFloat(height) < 120) { toast.error("Indica a tua altura"); return; }
+      if (!weight || parseFloat(weight) < 30) { toast.error("Indica o teu peso (mínimo 30kg)"); return; }
+      if (!height || parseFloat(height) < 120) { toast.error("Indica a tua altura (mínimo 120cm)"); return; }
     }
     if (step === 2) {
       if (!kmPerWeek || parseFloat(kmPerWeek) < 0) { toast.error("Indica os km semanais"); return; }
-      if (!paceInput || paceInputToSec(paceInput) === null) { toast.error("Indica o pace médio (ex: 5:30)"); return; }
+      const paceSec = paceInputToSec(paceInput);
+      if (!paceInput) { toast.error("Indica o pace médio — ex: 5:30"); return; }
+      if (!paceInput.includes(":")) { toast.error("Usa o formato min:seg — ex: 5:30 (não uses ponto)"); return; }
+      if (paceSec === null) { toast.error("Pace inválido — usa o formato 5:30 (entre 2:00 e 15:00)"); return; }
       if (runDays.length === 0) { toast.error("Seleciona pelo menos 1 dia de corrida"); return; }
     }
     setStep((s) => s + 1);
@@ -81,7 +97,7 @@ export default function Onboarding() {
 
   const handleSubmit = async () => {
     const paceSec = paceInputToSec(paceInput);
-    if (!paceSec) return toast.error("Pace inválido");
+    if (!paceSec) return toast.error("Pace inválido — usa o formato 5:30");
     setSubmitting(true);
     try {
       const { error } = await supabase.from("profiles").update({
@@ -99,7 +115,6 @@ export default function Onboarding() {
       }).eq("id", user!.id);
       if (error) throw error;
 
-      // Registar peso na biometria de hoje
       const today = new Date().toISOString().split("T")[0];
       await supabase.from("daily_biometrics").upsert({
         user_id: user!.id,
@@ -129,7 +144,6 @@ export default function Onboarding() {
           <div className="h-full bg-primary transition-all duration-500" style={{ width: `${(step / totalSteps) * 100}%` }} />
         </div>
 
-        {/* Passo 1 — Dados pessoais */}
         {step === 1 && (
           <div className="space-y-5">
             <div>
@@ -154,7 +168,7 @@ export default function Onboarding() {
               </div>
               <div className="space-y-2">
                 <Label className="text-foreground">Altura (cm)</Label>
-                <Input type="number" step="0.5" min={120} max={230} value={height}
+                <Input type="number" step="1" min={120} max={230} value={height}
                   onChange={(e) => setHeight(e.target.value)} placeholder="175" />
               </div>
             </div>
@@ -167,7 +181,6 @@ export default function Onboarding() {
           </div>
         )}
 
-        {/* Passo 2 — Configuração de treino */}
         {step === 2 && (
           <div className="space-y-5">
             <div>
@@ -177,14 +190,22 @@ export default function Onboarding() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-foreground">Km por semana</Label>
-                <Input type="number" step="0.5" min={0} max={300} value={kmPerWeek}
+                <Input type="number" step="1" min={0} max={300} value={kmPerWeek}
                   onChange={(e) => setKmPerWeek(e.target.value)} placeholder="Ex: 35" />
               </div>
               <div className="space-y-2">
-                <Label className="text-foreground">Pace médio (min/km)</Label>
-                <Input value={paceInput} onChange={(e) => setPaceInput(e.target.value)} placeholder="Ex: 5:30" />
-                {paceInput && paceInputToSec(paceInput) && (
-                  <p className="text-xs text-muted-foreground">{fmtPace(paceInputToSec(paceInput))} min/km</p>
+                <Label className="text-foreground">Pace médio (min:seg/km)</Label>
+                <Input
+                  value={paceInput}
+                  onChange={(e) => handlePaceChange(e.target.value)}
+                  placeholder="Ex: 5:30"
+                  className={paceError ? "border-destructive" : ""}
+                />
+                {paceError && (
+                  <p className="text-xs text-destructive mt-1">{paceError}</p>
+                )}
+                {paceInput && !paceError && paceInputToSec(paceInput) && (
+                  <p className="text-xs text-emerald-500 mt-1">✓ {fmtPace(paceInputToSec(paceInput))} min/km</p>
                 )}
               </div>
             </div>
@@ -230,7 +251,6 @@ export default function Onboarding() {
           </div>
         )}
 
-        {/* Passo 3 — Como funciona */}
         {step === 3 && (
           <div className="space-y-5">
             <div>
