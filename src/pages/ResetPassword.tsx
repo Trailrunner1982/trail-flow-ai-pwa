@@ -35,20 +35,36 @@ export default function ResetPassword() {
     e.preventDefault();
     if (checks.some(c => !c.ok)) return toast.error("A password não cumpre os requisitos");
     setSubmitting(true);
+
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
       setSubmitting(false);
       return toast.error(error.message);
     }
 
-    // Se foi forçado, limpa o must_change_password
-    if (isForced) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from("profiles")
-          .update({ must_change_password: false })
-          .eq("id", user.id);
+    // Limpar must_change_password e verificar onboarding
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from("profiles")
+        .update({ must_change_password: false })
+        .eq("id", user.id);
+
+      // Verificar se o onboarding está completo
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("onboarding_completed")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      setSubmitting(false);
+      toast.success("Password atualizada com sucesso!");
+
+      if (!profile?.onboarding_completed) {
+        navigate("/onboarding");
+      } else {
+        navigate("/dashboard");
       }
+      return;
     }
 
     setSubmitting(false);
