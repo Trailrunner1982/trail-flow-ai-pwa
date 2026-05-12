@@ -87,13 +87,11 @@ export default function AdminUsers() {
   const confirmDelete = async () => {
     if (!toDelete) return;
     setDeleting(true);
-    const { data, error } = await supabase.functions.invoke("delete-athlete", {
-      body: { user_id: toDelete.id },
+    const { error } = await supabase.rpc("delete_athlete", {
+      p_user_id: toDelete.id,
     });
     setDeleting(false);
-    if (error || (data as any)?.error) {
-      return toast.error((data as any)?.error || error?.message || "Falha ao apagar");
-    }
+    if (error) return toast.error(error.message);
     toast.success(`Atleta ${toDelete.full_name || toDelete.id.slice(0, 8)} apagado`);
     setToDelete(null);
     load();
@@ -196,34 +194,4 @@ export default function AdminUsers() {
                     <UserCog className="w-4 h-4" />
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => toggleSuspend(row)} title={row.is_suspended ? "Reativar" : "Suspender"}>
-                    {row.is_suspended ? <Shield className="w-4 h-4" /> : <ShieldOff className="w-4 h-4 text-destructive" />}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setToDelete(row)} title="Apagar atleta">
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Card>
-
-      <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Apagar atleta?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Vais apagar <strong>{toDelete?.full_name || toDelete?.id.slice(0, 8)}</strong> e todos os dados associados (treinos, biometria, provas, etc.). Esta ação é irreversível.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting ? "A apagar..." : "Apagar definitivamente"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
+                    {row.is_suspended ? <Shield className="w-4 h-4" /> : <ShieldOff className="w-4 h-4 text-
