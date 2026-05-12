@@ -18,10 +18,10 @@ import DashboardPage from "./pages/Dashboard";
 import CalendarPage from "./pages/Calendar";
 import StrengthPage from "./pages/Strength";
 import ProfilePage from "./pages/Profile";
-import AdminSimulator from "./pages/AdminSimulator";
 import AdminUsers from "./pages/AdminUsers";
 import AdminContent from "./pages/AdminContent";
 import AdminFeedback from "./pages/AdminFeedback";
+import SubscriptionExpired from "./pages/SubscriptionExpired";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -38,6 +38,7 @@ const App = () => (
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/auth" element={<AuthPage />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/subscription-expired" element={<SubscriptionExpired />} />
               <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
               <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
                 <Route path="/dashboard" element={<DashboardPage />} />
@@ -47,7 +48,6 @@ const App = () => (
                 <Route path="/strength" element={<StrengthPage />} />
                 <Route path="/coach" element={<CoachPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
-                <Route path="/admin/simulator" element={<AdminRoute><AdminSimulator /></AdminRoute>} />
                 <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
                 <Route path="/admin/content" element={<AdminRoute><AdminContent /></AdminRoute>} />
                 <Route path="/admin/feedback" element={<AdminRoute><AdminFeedback /></AdminRoute>} />
