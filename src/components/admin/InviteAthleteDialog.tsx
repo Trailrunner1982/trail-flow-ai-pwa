@@ -20,7 +20,6 @@ interface Props {
 
 const DEFAULT_PASSWORD = "TrailForge2026!";
 
-// Cliente separado para criar atletas sem interferir com a sessão do admin
 const supabaseAnon = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
@@ -51,7 +50,6 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
     if (!email.trim()) return toast.error("Email obrigatório");
     setLoading(true);
     try {
-      // Usar cliente separado para não interferir com sessão do admin
       const { data: signUpData, error: signUpError } = await supabaseAnon.auth.signUp({
         email: email.trim(),
         password: DEFAULT_PASSWORD,
@@ -65,13 +63,15 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
 
       const userId = signUpData.user.id;
 
-      // Atualizar perfil usando o cliente principal (sessão do admin)
-      await supabase.from("profiles").upsert({
-        id: userId,
+      // Esperar o trigger criar o perfil
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Atualizar perfil com must_change_password
+      await supabase.from("profiles").update({
         full_name: fullName.trim() || null,
         subscription_end_date: endDate ? format(endDate, "yyyy-MM-dd") : null,
         must_change_password: true,
-      });
+      }).eq("id", userId);
 
       setCreated(true);
       toast.success("Atleta criado com sucesso!");
