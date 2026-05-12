@@ -172,17 +172,6 @@ export default function RacesPage() {
     toast.success(editing ? "Prova atualizada" : "Prova criada");
     setOpen(false);
     await fetchRaces();
-    // Auto-validate after save
-    const { data: latest } = await supabase
-      .from("races")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("name", payload.name)
-      .eq("race_date", payload.race_date)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (latest) handleValidate(latest as any);
   };
 
   const handleDelete = async () => {
