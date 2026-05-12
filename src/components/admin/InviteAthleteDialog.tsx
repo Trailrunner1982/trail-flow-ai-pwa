@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { createClient } from "@supabase/supabase-js";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,13 @@ interface Props {
 }
 
 const DEFAULT_PASSWORD = "TrailForge2026!";
+
+// Cliente separado para criar atletas sem interferir com a sessão do admin
+const supabaseAnon = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
 
 export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
   const [email, setEmail] = useState("");
@@ -43,11 +51,8 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
     if (!email.trim()) return toast.error("Email obrigatório");
     setLoading(true);
     try {
-      // Guardar a sessão atual do admin
-      const { data: { session: adminSession } } = await supabase.auth.getSession();
-
-      // Criar o utilizador
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      // Usar cliente separado para não interferir com sessão do admin
+      const { data: signUpData, error: signUpError } = await supabaseAnon.auth.signUp({
         email: email.trim(),
         password: DEFAULT_PASSWORD,
         options: {
@@ -60,15 +65,7 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
 
       const userId = signUpData.user.id;
 
-      // Restaurar a sessão do admin imediatamente
-      if (adminSession) {
-        await supabase.auth.setSession({
-          access_token: adminSession.access_token,
-          refresh_token: adminSession.refresh_token,
-        });
-      }
-
-      // Atualizar perfil do novo atleta
+      // Atualizar perfil usando o cliente principal (sessão do admin)
       await supabase.from("profiles").upsert({
         id: userId,
         full_name: fullName.trim() || null,
@@ -77,7 +74,7 @@ export function InviteAthleteDialog({ open, onOpenChange, onInvited }: Props) {
       });
 
       setCreated(true);
-      toast.success(`Atleta criado com sucesso!`);
+      toast.success("Atleta criado com sucesso!");
       onInvited();
     } catch (e: any) {
       toast.error(e?.message ?? "Erro ao criar atleta");
