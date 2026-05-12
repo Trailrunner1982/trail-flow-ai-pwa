@@ -53,17 +53,21 @@ export default function AuthPage() {
         });
         if (error) throw error;
 
-        // Verificar se tem de mudar a password
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (currentUser) {
           const { data: profile } = await supabase
             .from("profiles")
-            .select("must_change_password")
+            .select("must_change_password, onboarding_completed")
             .eq("id", currentUser.id)
             .maybeSingle();
 
           if (profile?.must_change_password) {
             navigate("/reset-password?force=true");
+            return;
+          }
+
+          if (!profile?.onboarding_completed) {
+            navigate("/onboarding");
             return;
           }
         }
