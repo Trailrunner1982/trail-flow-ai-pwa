@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { calculateBMI, calculateMetabolicAge, calculateZones } from "@/lib/training";
 import { fmtPace } from "@/lib/format";
-import { User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2 } from "lucide-react";
+import { User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { differenceInYears, format, subDays } from "date-fns";
 import { useLanguage } from "@/lib/i18n";
@@ -30,6 +30,7 @@ interface Profile {
   available_strength_days: number[] | null;
   long_run_day: number | null;
   avatar_url: string | null;
+  strava_athlete_id: number | null;
 }
 
 interface WeightEntry {
@@ -54,7 +55,6 @@ function Tooltip2({ text }: { text: string }) {
   );
 }
 
-// Converte "5:30" → 330 segundos
 function paceInputToSec(val: string): number | null {
   if (!val) return null;
   if (val.includes(":")) {
@@ -66,7 +66,6 @@ function paceInputToSec(val: string): number | null {
   return isNaN(n) ? null : n;
 }
 
-// Converte 330 segundos → "5:30"
 function secToPaceInput(sec: number | null): string {
   if (!sec) return "";
   const m = Math.floor(sec / 60);
@@ -88,13 +87,15 @@ export default function ProfilePage() {
   const [weightHistory, setWeightHistory] = useState<WeightEntry[]>([]);
   const [newWeight, setNewWeight] = useState("");
   const [paceInput, setPaceInput] = useState("");
+  const [stravaConnected, setStravaConnected] = useState(false);
+  const [stravaImporting, setStravaImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<Profile>({
     full_name: "", date_of_birth: null, weight_kg: null, height_cm: null,
     max_hr: null, resting_hr: null, vo2_max: null,
     baseline_avg_pace_sec_per_km: null, baseline_km_per_week: null,
     available_run_days: [1,2,3,4,5,6], available_strength_days: [2,4], long_run_day: 6,
-    avatar_url: null,
+    avatar_url: null, strava_athlete_id: null,
   });
 
   const DAYS = [
@@ -117,8 +118,10 @@ export default function ProfilePage() {
         available_strength_days: data.available_strength_days ?? [2,4],
         long_run_day: data.long_run_day ?? 6,
         avatar_url: (data as any).avatar_url ?? null,
+        strava_athlete_id: (data as any).strava_athlete_id ?? null,
       });
       setPaceInput(secToPaceInput(data.baseline_avg_pace_sec_per_km));
+      if ((data as any).strava_athlete_id) setStravaConnected(true);
     }
 
     const since = format(subDays(new Date(), 90), "yyyy-MM-dd");
@@ -135,6 +138,36 @@ export default function ProfilePage() {
   }, [userId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Processar callback do Strava
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    if (code && state === "strava" && userId) {
+      setStravaImporting(true);
+      supabase.functions.invoke("strava-oauth", {
+        body: { code, user_id: userId },
+      }).then(({ data, error }) => {
+        setStravaImporting(false);
+        if (error || (data as any)?.error) {
+          toast.error("Erro ao ligar Strava: " + ((data as any)?.error || error?.message));
+          return;
+        }
+        toast.success(`Strava ligado! ${(data as any).activities_imported} atividades importadas.`);
+        setStravaConnected(true);
+        window.history.replaceState({}, "", "/profile");
+        load();
+      });
+    }
+  }, [userId]);
+
+  const connectStrava = () => {
+    const clientId = import.meta.env.VITE_STRAVA_CLIENT_ID;
+    const redirect = `${window.location.origin}/profile`;
+    const url = `https://www.strava.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirect)}&response_type=code&scope=activity:read_all&state=strava`;
+    window.location.href = url;
+  };
 
   const num = (v: any) => (v === "" || v == null ? null : Number(v));
 
@@ -231,7 +264,6 @@ export default function ProfilePage() {
 
   if (loading) return <LoadingScreen />;
 
-  // IMC usa o peso mais recente do histórico
   const currentWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight_kg : form.weight_kg;
   const bmi = currentWeight && form.height_cm ? calculateBMI(currentWeight, form.height_cm) : null;
   const age = form.date_of_birth ? differenceInYears(new Date(), new Date(form.date_of_birth)) : null;
@@ -316,7 +348,6 @@ export default function ProfilePage() {
               <Input type="number" inputMode="numeric" value={form.height_cm ?? ""} onChange={(e) => setForm({ ...form, height_cm: num(e.target.value) })} />
             </Field>
           </div>
-
           <div className="border-t border-border/40 pt-4">
             <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-3 flex items-center gap-2">
               <Heart className="w-3.5 h-3.5 text-primary" /> {t("profile.section.hr")}
@@ -333,12 +364,47 @@ export default function ProfilePage() {
               </Field>
             </div>
           </div>
-
           <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
           </Button>
         </Card>
       )}
+
+      {/* Strava */}
+      <Card className="p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Activity className="w-4 h-4 text-orange-500" /> Strava
+            <Tooltip2 text="Liga o teu Strava para importar automaticamente as tuas atividades dos últimos 90 dias. Funciona com Garmin, Coros, Suunto e Polar." />
+          </h3>
+          {stravaConnected && (
+            <Badge className="bg-orange-500/15 text-orange-500 border-orange-500/30">
+              ✓ Ligado
+            </Badge>
+          )}
+        </div>
+        {stravaConnected ? (
+          <p className="text-xs text-muted-foreground">
+            O Strava está ligado. As tuas atividades são importadas automaticamente para Treinos Livres.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Liga o teu Strava para importar atividades de Garmin, Coros, Suunto e Polar automaticamente.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={connectStrava}
+              disabled={stravaImporting}
+              className="gap-2 border-orange-500/40 text-orange-500 hover:bg-orange-500/10"
+            >
+              {stravaImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
+              {stravaImporting ? "A importar..." : "Ligar Strava"}
+            </Button>
+          </>
+        )}
+      </Card>
 
       {/* Peso */}
       <Card className="p-5 space-y-4">
@@ -354,13 +420,11 @@ export default function ProfilePage() {
             </Badge>
           )}
         </div>
-
         <div className="flex gap-2">
           <Input type="number" step="0.1" inputMode="decimal" placeholder="Peso hoje (kg)" value={newWeight}
             onChange={(e) => setNewWeight(e.target.value)} className="w-40" />
           <Button size="sm" onClick={handleAddWeight} disabled={!newWeight}>Registar</Button>
         </div>
-
         {weightHistory.length > 1 ? (
           <ResponsiveContainer width="100%" height={140}>
             <LineChart data={weightHistory.map(w => ({ date: w.date.slice(5), kg: w.weight_kg }))}>
@@ -386,11 +450,9 @@ export default function ProfilePage() {
             <Settings2 className="w-3.5 h-3.5" /> {editingTraining ? "Fechar" : "Configurar treino"}
           </Button>
         </div>
-
         {!trainingConfigured && !editingTraining && (
           <p className="text-xs text-orange-400">⚠️ Ainda não configuraste o teu treino. O coach AI não consegue gerar planos sem estes dados.</p>
         )}
-
         {trainingConfigured && !editingTraining && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
             <div className="bg-muted/40 rounded-lg p-3">
@@ -407,22 +469,16 @@ export default function ProfilePage() {
             </div>
           </div>
         )}
-
         {editingTraining && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Pace base (min/km)">
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="ex: 5:30"
-                  value={paceInput}
+                <Input type="text" inputMode="numeric" placeholder="ex: 5:30" value={paceInput}
                   onChange={(e) => {
                     setPaceInput(e.target.value);
                     const sec = paceInputToSec(e.target.value);
                     setForm({ ...form, baseline_avg_pace_sec_per_km: sec });
-                  }}
-                />
+                  }} />
                 {form.baseline_avg_pace_sec_per_km && (
                   <p className="text-xs text-muted-foreground mt-1">= {form.baseline_avg_pace_sec_per_km} seg/km</p>
                 )}
@@ -432,7 +488,6 @@ export default function ProfilePage() {
                   onChange={(e) => setForm({ ...form, baseline_km_per_week: num(e.target.value) })} />
               </Field>
             </div>
-
             <div className="space-y-3">
               <div>
                 <Label className="text-xs">{t("profile.field.runDays")}</Label>
@@ -475,7 +530,6 @@ export default function ProfilePage() {
                 </div>
               </div>
             </div>
-
             <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
             </Button>
