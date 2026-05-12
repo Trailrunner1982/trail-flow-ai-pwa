@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { FileText, Video, Map as MapIcon, ExternalLink, Search, Download } from "lucide-react";
+import { FileText, Video, Map as MapIcon, ExternalLink, Search, Download, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 
 type ContentType = "video" | "article" | "gpx";
@@ -72,14 +72,13 @@ export default function LibraryPage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-          <FileText className="w-6 h-6 text-primary" /> Biblioteca
+          <BookOpen className="w-6 h-6 text-primary" /> Biblioteca
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
           Vídeos de técnica, artigos e trilhos GPX partilhados pelo teu treinador.
         </p>
       </div>
 
-      {/* Pesquisa */}
       <div className="relative max-w-sm">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -90,7 +89,6 @@ export default function LibraryPage() {
         />
       </div>
 
-      {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="all">Todos ({counts.all})</TabsTrigger>
@@ -136,7 +134,6 @@ export default function LibraryPage() {
                       <p className="text-xs text-muted-foreground line-clamp-3">{r.description}</p>
                     )}
 
-                    {/* Métricas GPX */}
                     {r.content_type === "gpx" && (
                       <div className="flex flex-wrap gap-1">
                         {r.location && <Badge variant="outline" className="text-xs">{r.location}</Badge>}
@@ -146,7 +143,6 @@ export default function LibraryPage() {
                       </div>
                     )}
 
-                    {/* Tags */}
                     {r.tags && r.tags.length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {r.tags.map((tag) => (
@@ -157,7 +153,6 @@ export default function LibraryPage() {
                       </div>
                     )}
 
-                    {/* Ações */}
                     <div className="pt-1">
                       {r.url && (
                         <a href={r.url} target="_blank" rel="noreferrer">
@@ -168,12 +163,8 @@ export default function LibraryPage() {
                         </a>
                       )}
                       {r.storage_path && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full gap-2"
-                          onClick={() => downloadGpx(r.storage_path!)}
-                        >
+                        <Button size="sm" variant="outline" className="w-full gap-2"
+                          onClick={() => downloadGpx(r.storage_path!)}>
                           <Download className="w-3.5 h-3.5" /> Descarregar GPX
                         </Button>
                       )}
