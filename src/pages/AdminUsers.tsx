@@ -194,4 +194,34 @@ export default function AdminUsers() {
                     <UserCog className="w-4 h-4" />
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => toggleSuspend(row)} title={row.is_suspended ? "Reativar" : "Suspender"}>
-                    {row.is_suspended ? <Shield className="w-4 h-4" /> : <ShieldOff className="w-4 h-4 text-
+                    {row.is_suspended ? <Shield className="w-4 h-4" /> : <ShieldOff className="w-4 h-4 text-destructive" />}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setToDelete(row)} title="Apagar atleta">
+                    <Trash2 className="w-4 h-4 text-destructive" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+
+      <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar atleta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vais apagar <strong>{toDelete?.full_name || toDelete?.id.slice(0, 8)}</strong> e todos os dados associados (treinos, biometria, provas, etc.). Esta ação é irreversível.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting ? "A apagar..." : "Apagar definitivamente"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
