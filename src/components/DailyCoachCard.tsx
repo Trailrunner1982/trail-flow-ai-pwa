@@ -28,7 +28,7 @@ const verdictMeta: Record<Recommendation["verdict"], { label: string; cls: strin
   go: { label: "Avança", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" },
   modify: { label: "Ajusta", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30" },
   easy: { label: "Faz fácil", cls: "bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30" },
-  rest: { label: "Descansa", cls: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30" },
+  rest: { label: "Descansas", cls: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30" },
 };
 
 interface Props {
@@ -79,13 +79,30 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
     try {
       const today = format(new Date(), "yyyy-MM-dd");
       const weekAgo = format(subDays(new Date(), 7), "yyyy-MM-dd");
-      const [{ data: bio }, { data: rpe }] = await Promise.all([
-        supabase.from("daily_biometrics").select("measurement_date,sleep_score,hrv,stress_level,body_battery,energy_level,soreness_score,soreness_zones,mood,weight_kg")
-          .eq("user_id", user.id).gte("measurement_date", weekAgo).lte("measurement_date", today)
+      const monthAgo = format(subDays(new Date(), 30), "yyyy-MM-dd");
+
+      const [{ data: bio }, { data: rpe }, { data: stravaActivities }] = await Promise.all([
+        supabase
+          .from("daily_biometrics")
+          .select("measurement_date,sleep_score,hrv,stress_level,body_battery,energy_level,soreness_score,soreness_zones,mood,weight_kg")
+          .eq("user_id", user.id)
+          .gte("measurement_date", weekAgo)
+          .lte("measurement_date", today)
           .order("measurement_date", { ascending: false }),
-        supabase.from("completed_workouts").select("workout_date,rpe,actual_distance_km")
-          .eq("user_id", user.id).gte("workout_date", weekAgo).lte("workout_date", today)
+        supabase
+          .from("completed_workouts")
+          .select("workout_date,rpe,actual_distance_km")
+          .eq("user_id", user.id)
+          .gte("workout_date", weekAgo)
+          .lte("workout_date", today)
           .order("workout_date", { ascending: false }),
+        supabase
+          .from("free_workouts")
+          .select("workout_date,activity,distance_km,duration_min,elevation_m,avg_hr,avg_pace_sec_per_km")
+          .eq("user_id", user.id)
+          .gte("workout_date", monthAgo)
+          .order("workout_date", { ascending: false })
+          .limit(30),
       ]);
 
       const { data, error } = await supabase.functions.invoke("daily-coach", {
@@ -95,8 +112,10 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
           recent_bio: bio ?? [],
           recent_rpe: rpe ?? [],
           readiness,
+          recent_activities: stravaActivities ?? [],
         },
       });
+
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
       const result: Recommendation = (data as any).result;
@@ -186,11 +205,13 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
           </div>
           <div>
             <div className="text-sm font-semibold">Coach diário</div>
-            <div className="text-[11px] text-muted-foreground">Recomendação com base na tua biometria + RPE recente</div>
+            <div className="text-[11px] text-muted-foreground">Recomendação com base na tua biometria + RPE + atividades recentes</div>
           </div>
         </div>
         <Button size="sm" onClick={run} disabled={loading}>
-          {loading ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> A analisar…</> : (rec ? "Reanalisar" : "Analisar hoje")}
+          {loading
+            ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> A analisar…</>
+            : (rec ? "Reanalisar" : "Analisar hoje")}
         </Button>
       </div>
 
@@ -215,7 +236,6 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
             </div>
           )}
 
-          {/* Sugestão concreta + Review & edit */}
           <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -253,7 +273,9 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
                 </Button>
               )}
               <Button size="sm" onClick={applyToToday} disabled={saving}>
-                {saving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
+                {saving
+                  ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  : <Check className="w-3.5 h-3.5 mr-1.5" />}
                 {editing ? (dirty ? "Guardar versão final" : "Guardar") : "Aceitar e guardar"}
               </Button>
             </div>
