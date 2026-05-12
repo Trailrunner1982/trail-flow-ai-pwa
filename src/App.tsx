@@ -18,6 +18,7 @@ import DashboardPage from "./pages/Dashboard";
 import CalendarPage from "./pages/Calendar";
 import StrengthPage from "./pages/Strength";
 import ProfilePage from "./pages/Profile";
+import LibraryPage from "./pages/Library";
 import AdminUsers from "./pages/AdminUsers";
 import AdminContent from "./pages/AdminContent";
 import AdminFeedback from "./pages/AdminFeedback";
@@ -48,6 +49,7 @@ const App = () => (
                 <Route path="/strength" element={<StrengthPage />} />
                 <Route path="/coach" element={<CoachPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
+                <Route path="/library" element={<LibraryPage />} />
                 <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
                 <Route path="/admin/content" element={<AdminRoute><AdminContent /></AdminRoute>} />
                 <Route path="/admin/feedback" element={<AdminRoute><AdminFeedback /></AdminRoute>} />
