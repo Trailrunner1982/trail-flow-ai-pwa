@@ -1,25 +1,30 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { z } from "zod";
-import { Loader2, Mountain, ChevronRight, ChevronLeft } from "lucide-react";
+import { Loader2, Mountain, ChevronRight, ChevronLeft, LayoutDashboard, Calendar, Brain, Flag, HelpCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { parsePaceToSeconds, fmtPace } from "@/lib/format";
+import { fmtPace } from "@/lib/format";
 
-const profileSchema = z.object({
-  full_name: z.string().trim().min(2, "Nome muito curto").max(100),
-  date_of_birth: z.string().min(1, "Indica a data de nascimento"),
-  weight_kg: z.number().min(30).max(200),
-  height_cm: z.number().min(120).max(230),
-  baseline_km_per_week: z.number().min(0).max(300),
-  baseline_avg_pace_sec_per_km: z.number().min(180).max(900),
-  display_preference: z.enum(["pace", "distance", "time", "heart_rate"]),
-});
+function paceInputToSec(val: string): number | null {
+  if (!val) return null;
+  if (val.includes(":")) {
+    const [m, s] = val.split(":").map(Number);
+    if (isNaN(m) || isNaN(s)) return null;
+    return m * 60 + s;
+  }
+  const n = Number(val);
+  return isNaN(n) ? null : n;
+}
+
+const DAYS = [
+  { v: 1, l: "Seg" }, { v: 2, l: "Ter" }, { v: 3, l: "Qua" },
+  { v: 4, l: "Qui" }, { v: 5, l: "Sex" }, { v: 6, l: "Sáb" }, { v: 0, l: "Dom" },
+];
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -27,19 +32,23 @@ export default function Onboarding() {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
 
+  // Passo 1 — Dados pessoais
   const [fullName, setFullName] = useState("");
   const [dob, setDob] = useState("");
   const [weight, setWeight] = useState("");
   const [height, setHeight] = useState("");
+
+  // Passo 2 — Configuração de treino
   const [kmPerWeek, setKmPerWeek] = useState("");
   const [paceInput, setPaceInput] = useState("");
-  const [displayPref, setDisplayPref] = useState<"pace" | "distance" | "time" | "heart_rate">("pace");
+  const [runDays, setRunDays] = useState<number[]>([1, 2, 3, 4, 5, 6]);
+  const [strengthDays, setStrengthDays] = useState<number[]>([2, 4]);
+  const [longRunDay, setLongRunDay] = useState<number>(6);
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth");
   }, [user, authLoading, navigate]);
 
-  // BMI live
   const bmi = (() => {
     const w = parseFloat(weight);
     const h = parseFloat(height);
@@ -47,33 +56,59 @@ export default function Onboarding() {
     return (w / Math.pow(h / 100, 2)).toFixed(1);
   })();
 
-  const handleSubmit = async () => {
-    const paceSec = parsePaceToSeconds(paceInput);
-    const parsed = profileSchema.safeParse({
-      full_name: fullName,
-      date_of_birth: dob,
-      weight_kg: parseFloat(weight),
-      height_cm: parseFloat(height),
-      baseline_km_per_week: parseFloat(kmPerWeek),
-      baseline_avg_pace_sec_per_km: paceSec ?? -1,
-      display_preference: displayPref,
-    });
-    if (!parsed.success) {
-      toast.error(parsed.error.errors[0].message);
-      return;
+  const toggleDay = (day: number, list: number[], setList: (d: number[]) => void) => {
+    if (list.includes(day)) {
+      setList(list.filter((d) => d !== day));
+    } else {
+      setList([...list, day].sort());
     }
+  };
+
+  const next = () => {
+    if (step === 1) {
+      if (!fullName.trim() || fullName.trim().length < 2) { toast.error("Indica o teu nome completo"); return; }
+      if (!dob) { toast.error("Indica a tua data de nascimento"); return; }
+      if (!weight || parseFloat(weight) < 30) { toast.error("Indica o teu peso"); return; }
+      if (!height || parseFloat(height) < 120) { toast.error("Indica a tua altura"); return; }
+    }
+    if (step === 2) {
+      if (!kmPerWeek || parseFloat(kmPerWeek) < 0) { toast.error("Indica os km semanais"); return; }
+      if (!paceInput || paceInputToSec(paceInput) === null) { toast.error("Indica o pace médio (ex: 5:30)"); return; }
+      if (runDays.length === 0) { toast.error("Seleciona pelo menos 1 dia de corrida"); return; }
+    }
+    setStep((s) => s + 1);
+  };
+
+  const handleSubmit = async () => {
+    const paceSec = paceInputToSec(paceInput);
+    if (!paceSec) return toast.error("Pace inválido");
     setSubmitting(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          ...parsed.data,
-          onboarding_completed: true,
-        })
-        .eq("id", user!.id);
+      const { error } = await supabase.from("profiles").update({
+        full_name: fullName.trim(),
+        date_of_birth: dob,
+        weight_kg: parseFloat(weight),
+        height_cm: parseFloat(height),
+        baseline_km_per_week: parseFloat(kmPerWeek),
+        baseline_avg_pace_sec_per_km: paceSec,
+        available_run_days: runDays,
+        available_strength_days: strengthDays,
+        long_run_day: longRunDay,
+        onboarding_completed: true,
+        must_change_password: false,
+      }).eq("id", user!.id);
       if (error) throw error;
-      toast.success("Perfil criado. Agora adiciona a tua próxima prova!");
-      navigate("/races");
+
+      // Registar peso na biometria de hoje
+      const today = new Date().toISOString().split("T")[0];
+      await supabase.from("daily_biometrics").upsert({
+        user_id: user!.id,
+        measurement_date: today,
+        weight_kg: parseFloat(weight),
+      }, { onConflict: "user_id,measurement_date" });
+
+      toast.success("Perfil criado! Bem-vindo ao Trail Forge 🏔️");
+      navigate("/dashboard");
     } catch (err: any) {
       toast.error(err.message ?? "Erro ao guardar perfil");
     } finally {
@@ -81,122 +116,181 @@ export default function Onboarding() {
     }
   };
 
-  const next = () => {
-    if (step === 1 && (!fullName.trim() || !dob)) { toast.error("Preenche nome e data de nascimento"); return; }
-    if (step === 2 && (!weight || !height)) { toast.error("Indica peso e altura"); return; }
-    if (step === 3 && (!kmPerWeek || !paceInput || parsePaceToSeconds(paceInput) === null)) {
-      toast.error("Preenche os km/semana e pace médio (ex: 5:30)"); return;
-    }
-    setStep((s) => s + 1);
-  };
-
-  const totalSteps = 4;
+  const totalSteps = 3;
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-xl glass-card p-6 sm:p-10 animate-slide-up">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+      <div className="w-full max-w-xl bg-card border border-border rounded-2xl p-6 sm:p-10 shadow-lg">
         <div className="flex items-center gap-2 mb-2 text-primary">
           <Mountain className="w-5 h-5" />
-          <span className="text-xs font-bold tracking-widest uppercase">Onboarding · Passo {step} de {totalSteps}</span>
+          <span className="text-xs font-bold tracking-widest uppercase text-primary">Onboarding · Passo {step} de {totalSteps}</span>
         </div>
         <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mb-8">
-          <div className="h-full bg-gradient-hero transition-all duration-500" style={{ width: `${(step / totalSteps) * 100}%` }} />
+          <div className="h-full bg-primary transition-all duration-500" style={{ width: `${(step / totalSteps) * 100}%` }} />
         </div>
 
+        {/* Passo 1 — Dados pessoais */}
         {step === 1 && (
-          <div className="space-y-5 animate-fade-in">
+          <div className="space-y-5">
             <div>
-              <h2 className="text-2xl font-bold">Quem és tu, atleta?</h2>
-              <p className="text-muted-foreground text-sm mt-1">Para personalizar o teu plano.</p>
+              <h2 className="text-2xl font-bold text-foreground">Quem és tu, atleta?</h2>
+              <p className="text-muted-foreground text-sm mt-1">Vamos personalizar a tua experiência.</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="name">Nome completo</Label>
-              <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} maxLength={100} />
+              <Label className="text-foreground">Nome completo</Label>
+              <Input value={fullName} onChange={(e) => setFullName(e.target.value)}
+                placeholder="João Silva" maxLength={100} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="dob">Data de nascimento</Label>
-              <Input id="dob" type="date" value={dob} onChange={(e) => setDob(e.target.value)} max={new Date().toISOString().split("T")[0]} />
-            </div>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="space-y-5 animate-fade-in">
-            <div>
-              <h2 className="text-2xl font-bold">Composição corporal</h2>
-              <p className="text-muted-foreground text-sm mt-1">Calculamos o IMC automaticamente.</p>
+              <Label className="text-foreground">Data de nascimento</Label>
+              <Input type="date" value={dob} onChange={(e) => setDob(e.target.value)}
+                max={new Date().toISOString().split("T")[0]} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="weight">Peso (kg)</Label>
-                <Input id="weight" type="number" step="0.1" min={30} max={200} value={weight} onChange={(e) => setWeight(e.target.value)} />
+                <Label className="text-foreground">Peso (kg)</Label>
+                <Input type="number" step="0.1" min={30} max={200} value={weight}
+                  onChange={(e) => setWeight(e.target.value)} placeholder="70" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="height">Altura (cm)</Label>
-                <Input id="height" type="number" step="0.5" min={120} max={230} value={height} onChange={(e) => setHeight(e.target.value)} />
+                <Label className="text-foreground">Altura (cm)</Label>
+                <Input type="number" step="0.5" min={120} max={230} value={height}
+                  onChange={(e) => setHeight(e.target.value)} placeholder="175" />
               </div>
             </div>
             {bmi && (
-              <div className="rounded-xl border border-border/60 bg-muted/40 p-4 flex items-baseline justify-between">
+              <div className="rounded-xl border border-border bg-muted/40 p-4 flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">IMC calculado</span>
-                <span className="stat-number text-3xl text-gradient">{bmi}</span>
+                <span className="text-3xl font-bold text-primary">{bmi}</span>
               </div>
             )}
           </div>
         )}
 
-        {step === 3 && (
-          <div className="space-y-5 animate-fade-in">
+        {/* Passo 2 — Configuração de treino */}
+        {step === 2 && (
+          <div className="space-y-5">
             <div>
-              <h2 className="text-2xl font-bold">Baseline das últimas 4 semanas</h2>
-              <p className="text-muted-foreground text-sm mt-1">É o ponto de partida do teu plano. Sê honesto.</p>
+              <h2 className="text-2xl font-bold text-foreground">Configura o teu treino</h2>
+              <p className="text-muted-foreground text-sm mt-1">O coach AI usa estes dados para gerar o teu plano. Podes alterar no Perfil a qualquer momento.</p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="km">Média de km por semana</Label>
-              <Input id="km" type="number" step="0.5" min={0} max={300} value={kmPerWeek} onChange={(e) => setKmPerWeek(e.target.value)} placeholder="Ex: 35" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-foreground">Km por semana</Label>
+                <Input type="number" step="0.5" min={0} max={300} value={kmPerWeek}
+                  onChange={(e) => setKmPerWeek(e.target.value)} placeholder="Ex: 35" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-foreground">Pace médio (min/km)</Label>
+                <Input value={paceInput} onChange={(e) => setPaceInput(e.target.value)} placeholder="Ex: 5:30" />
+                {paceInput && paceInputToSec(paceInput) && (
+                  <p className="text-xs text-muted-foreground">{fmtPace(paceInputToSec(paceInput))} min/km</p>
+                )}
+              </div>
             </div>
+
             <div className="space-y-2">
-              <Label htmlFor="pace">Pace médio ao km</Label>
-              <Input id="pace" value={paceInput} onChange={(e) => setPaceInput(e.target.value)} placeholder="Ex: 5:30" />
-              {paceInput && parsePaceToSeconds(paceInput) !== null && (
-                <p className="text-xs text-muted-foreground">Interpretado como <span className="text-primary font-medium">{fmtPace(parsePaceToSeconds(paceInput))}</span></p>
-              )}
+              <Label className="text-foreground">Dias disponíveis para correr</Label>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {DAYS.map((d) => (
+                  <Button key={d.v} type="button" size="sm"
+                    variant={runDays.includes(d.v) ? "default" : "outline"}
+                    onClick={() => toggleDay(d.v, runDays, setRunDays)}>
+                    {d.l}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-foreground">Dias de força</Label>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {DAYS.map((d) => (
+                  <Button key={d.v} type="button" size="sm"
+                    variant={strengthDays.includes(d.v) ? "default" : "outline"}
+                    onClick={() => toggleDay(d.v, strengthDays, setStrengthDays)}>
+                    {d.l}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-foreground">Dia do long run</Label>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {DAYS.map((d) => (
+                  <Button key={d.v} type="button" size="sm"
+                    variant={longRunDay === d.v ? "default" : "outline"}
+                    onClick={() => setLongRunDay(d.v)}>
+                    {d.l}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
-        {step === 4 && (
-          <div className="space-y-5 animate-fade-in">
+        {/* Passo 3 — Como funciona */}
+        {step === 3 && (
+          <div className="space-y-5">
             <div>
-              <h2 className="text-2xl font-bold">Como queres ver os treinos?</h2>
-              <p className="text-muted-foreground text-sm mt-1">Pode ser alterado a qualquer momento.</p>
+              <h2 className="text-2xl font-bold text-foreground">Como funciona o Trail Forge</h2>
+              <p className="text-muted-foreground text-sm mt-1">Uma plataforma completa para o teu treino de trail.</p>
             </div>
-            <RadioGroup value={displayPref} onValueChange={(v) => setDisplayPref(v as any)} className="grid grid-cols-2 gap-3">
-              {[
-                { v: "pace", label: "Por Pace" },
-                { v: "distance", label: "Por Distância" },
-                { v: "time", label: "Por Tempo" },
-                { v: "heart_rate", label: "Por HR" },
-              ].map((opt) => (
-                <Label key={opt.v} htmlFor={`pref-${opt.v}`}
-                  className={`flex items-center gap-3 rounded-xl border p-4 cursor-pointer transition-all ${displayPref === opt.v ? "border-primary bg-primary/10" : "border-border/60 hover:border-border"}`}>
-                  <RadioGroupItem id={`pref-${opt.v}`} value={opt.v} />
-                  <span className="font-medium">{opt.label}</span>
-                </Label>
-              ))}
-            </RadioGroup>
+            <div className="space-y-3">
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-border bg-muted/30">
+                <LayoutDashboard className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Painel</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Vê o teu estado de prontidão, o próximo treino e o resumo da semana.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-border bg-muted/30">
+                <Calendar className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Treinos</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">O teu plano semanal gerado automaticamente. Regista cada treino após completar.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-border bg-muted/30">
+                <Brain className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Treinador AI</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Análise inteligente dos teus treinos e recomendações adaptadas ao teu estado de forma.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-border bg-muted/30">
+                <Flag className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Provas</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Adiciona as tuas provas âncora e o plano adapta-se automaticamente para chegares preparado.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-border bg-muted/30">
+                <HelpCircle className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Biometria diária</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Regista sono, stress e dores musculares para o coach AI adaptar a intensidade dos treinos.</p>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground text-center">Podes alterar todos os teus dados a qualquer momento no <strong className="text-foreground">Perfil</strong>.</p>
           </div>
         )}
 
         <div className="flex justify-between mt-8 gap-3">
-          <Button variant="ghost" onClick={() => setStep((s) => Math.max(1, s - 1))} disabled={step === 1 || submitting}>
+          <Button variant="ghost" onClick={() => setStep((s) => Math.max(1, s - 1))}
+            disabled={step === 1 || submitting}>
             <ChevronLeft className="w-4 h-4" /> Voltar
           </Button>
           {step < totalSteps ? (
-            <Button variant="hero" onClick={next}>Continuar <ChevronRight className="w-4 h-4" /></Button>
+            <Button onClick={next}>
+              Continuar <ChevronRight className="w-4 h-4" />
+            </Button>
           ) : (
-            <Button variant="hero" onClick={handleSubmit} disabled={submitting}>
-              {submitting && <Loader2 className="w-4 h-4 animate-spin" />} Concluir
+            <Button onClick={handleSubmit} disabled={submitting}>
+              {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              Entrar no Trail Forge 🏔️
             </Button>
           )}
         </div>
