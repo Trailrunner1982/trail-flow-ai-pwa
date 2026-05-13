@@ -173,3 +173,11 @@
   .scrollbar-hide::-webkit-scrollbar { display: none; }
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
+@layer base {
+  [data-radix-ui-collection-item] {
+    color: hsl(var(--muted-foreground));
+  }
+  [role="tab"][data-state="active"] {
+    color: hsl(var(--foreground));
+  }
+}
