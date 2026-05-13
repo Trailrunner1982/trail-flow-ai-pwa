@@ -147,7 +147,7 @@ export default function ProfilePage() {
     if (code && state === "strava" && userId) {
       setStravaImporting(true);
       supabase.functions.invoke("strava-oauth", {
-        body: { code, user_id: userId },
+        body: { code, user_id: selfId ?? userId },
       }).then(({ data, error }) => {
         setStravaImporting(false);
         if (error || (data as any)?.error) {
