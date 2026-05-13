@@ -140,11 +140,16 @@ export default function CalendarPage() {
     setGenerating(true);
     try {
       const startDate = new Date();
-      const raceDate = addDays(startDate, 84);
-      const generated = generatePlan({
-        startDate, raceDate, raceDistanceKm: 42, raceElevationM: 2000,
-        terrainProfile: "mixed", baselineKmPerWeek: 35, baselineAvgPaceSecPerKm: 330,
-      });
+     const generated = generatePlan({
+  startDate,
+  raceDate: addDays(startDate, 84),
+  raceDistanceKm: 42,
+  raceElevationM: 2000,
+  terrainProfile: "mixed",
+  baselineKmPerWeek: 35,
+  baselineAvgPaceSecPerKm: 330,
+  raceName: "Demo Trail 42K",
+});
       const rows = generated.map((w) => ({ ...w, user_id: userId }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
       if (error) throw error;
