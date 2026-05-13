@@ -7,26 +7,18 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Brain,
-  Sparkles,
-  ThumbsUp,
-  CheckCircle2,
-  AlertTriangle,
-  ChevronDown,
-  ChevronUp,
-  Trash2,
-  Sun,
-  RefreshCw,
-  ClipboardCheck,
-  ArrowRight,
-  Settings2,
+  Brain, Sparkles, ThumbsUp, CheckCircle2, AlertTriangle,
+  ChevronDown, ChevronUp, Trash2, Sun, RefreshCw, ClipboardCheck,
+  ArrowRight, Settings2, MessageCircle, BookOpen,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt, enUS } from "date-fns/locale";
 import { toast } from "sonner";
 import type { Verdict, QuickFeedback, DeepFeedback } from "@/components/calendar/types";
+import MessagesPage from "./Messages";
+import LibraryPage from "./Library";
 
 interface FeedbackRow {
   id: string;
@@ -53,12 +45,8 @@ const verdictMeta: Record<Verdict, { key: string; color: string; icon: any }> = 
 };
 
 const ALL_TYPES = [
-  "workout_quick",
-  "workout_deep",
-  "daily_recommendation",
-  "daily_recommendation_applied",
-  "plan_adaptation",
-  "plan_adaptation_applied",
+  "workout_quick", "workout_deep", "daily_recommendation",
+  "daily_recommendation_applied", "plan_adaptation", "plan_adaptation_applied",
 ];
 
 type Filter = "all" | "deep" | "quick" | "daily" | "adapt";
@@ -72,26 +60,17 @@ export default function CoachPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [profileConfig, setProfileConfig] = useState<ProfileConfig | null>(null);
+  const [mainTab, setMainTab] = useState("coach");
 
   const fetchAll = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-
     const [{ data: feedbackData, error }, { data: profileData }] = await Promise.all([
-      supabase
-        .from("ai_feedback")
-        .select("*")
-        .eq("user_id", user.id)
-        .in("feedback_type", ALL_TYPES)
-        .order("created_at", { ascending: false })
-        .limit(200),
-      supabase
-        .from("profiles")
-        .select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days")
-        .eq("id", user.id)
-        .maybeSingle(),
+      supabase.from("ai_feedback").select("*").eq("user_id", user.id)
+        .in("feedback_type", ALL_TYPES).order("created_at", { ascending: false }).limit(200),
+      supabase.from("profiles").select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days")
+        .eq("id", user.id).maybeSingle(),
     ]);
-
     if (error) toast.error(error.message);
     setItems((feedbackData ?? []) as FeedbackRow[]);
     setProfileConfig(profileData as ProfileConfig | null);
@@ -141,90 +120,108 @@ export default function CoachPage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-          <Brain className="w-6 h-6 text-primary" /> {t("coach.title")}
+          <Brain className="w-6 h-6 text-primary" /> Treinador
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">{t("coach.subtitle")}</p>
+        <p className="text-sm text-muted-foreground mt-1">Coach AI, mensagens e biblioteca de conteúdos.</p>
       </div>
 
-      {/* Aviso se treino não configurado */}
-      {!trainingConfigured && (
-        <Card className="p-5 border-orange-500/30 bg-orange-500/5">
-          <div className="flex items-center gap-3 flex-wrap">
-            <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-orange-400">Treino não configurado</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Antes de usar o coach AI, configura os teus dados de treino no perfil — pace base, km semanais e dias disponíveis.
-              </p>
-            </div>
-            <Link to="/profile">
-              <Button size="sm" variant="outline">
-                <Settings2 className="w-3.5 h-3.5" /> Configurar treino <ArrowRight className="w-3.5 h-3.5" />
-              </Button>
-            </Link>
-          </div>
-        </Card>
-      )}
+      <Tabs value={mainTab} onValueChange={setMainTab}>
+        <TabsList>
+          <TabsTrigger value="coach">
+            <Brain className="w-3.5 h-3.5 mr-1.5" /> Coach AI
+          </TabsTrigger>
+          <TabsTrigger value="messages">
+            <MessageCircle className="w-3.5 h-3.5 mr-1.5" /> Mensagens
+          </TabsTrigger>
+          <TabsTrigger value="library">
+            <BookOpen className="w-3.5 h-3.5 mr-1.5" /> Biblioteca
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Como funciona */}
-      <Card className="p-5 bg-gradient-to-br from-primary/10 via-background to-background border-primary/30 space-y-4">
-        <div className="flex items-center gap-2">
-          <Brain className="w-5 h-5 text-primary" />
-          <h2 className="text-base font-semibold">{t("coach.how.title")}</h2>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <HowItem icon={Sun} title={t("coach.how.daily.title")} desc={t("coach.how.daily.desc")} />
-          <HowItem icon={RefreshCw} title={t("coach.how.adapt.title")} desc={t("coach.how.adapt.desc")} />
-          <HowItem icon={ClipboardCheck} title={t("coach.how.feedback.title")} desc={t("coach.how.feedback.desc")} />
-        </div>
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Link to="/dashboard"><Button size="sm" variant="outline">Dashboard</Button></Link>
-          <Link to="/calendar"><Button size="sm">{t("coach.how.cta")} <ArrowRight className="w-3.5 h-3.5" /></Button></Link>
-        </div>
-      </Card>
-
-      {/* Só mostra o resto se o treino estiver configurado */}
-      {trainingConfigured ? (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard label={t("coach.dailyCount")} value={counts.daily} icon={Sun} />
-            <StatCard label={t("coach.adaptCount")} value={counts.adapt} icon={RefreshCw} />
-            <StatCard label={t("coach.quickAnalyses")} value={counts.quick} icon={Sparkles} />
-            <StatCard label={t("coach.deepAnalyses")} value={counts.deep} icon={Brain} />
-          </div>
-
-          <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
-            <TabsList className="flex-wrap h-auto">
-              <TabsTrigger value="all">{t("coach.tab.all")}</TabsTrigger>
-              <TabsTrigger value="daily">{t("coach.tab.daily")}</TabsTrigger>
-              <TabsTrigger value="adapt">{t("coach.tab.adapt")}</TabsTrigger>
-              <TabsTrigger value="quick">{t("coach.tab.quick")}</TabsTrigger>
-              <TabsTrigger value="deep">{t("coach.tab.deep")}</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          {filtered.length === 0 ? (
-            <Card className="p-8 text-center text-sm text-muted-foreground">{t("coach.empty")}</Card>
-          ) : (
-            <div className="space-y-3">
-              {filtered.map((row) => (
-                <FeedbackItem
-                  key={row.id}
-                  row={row}
-                  expanded={expanded.has(row.id)}
-                  onToggle={() => toggle(row.id)}
-                  onDelete={() => remove(row.id)}
-                  dateLocale={dateLocale}
-                />
-              ))}
-            </div>
+        {/* Tab Coach AI */}
+        <TabsContent value="coach" className="mt-4 space-y-6">
+          {!trainingConfigured && (
+            <Card className="p-5 border-orange-500/30 bg-orange-500/5">
+              <div className="flex items-center gap-3 flex-wrap">
+                <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-orange-400">Treino não configurado</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Antes de usar o coach AI, configura os teus dados de treino no perfil.
+                  </p>
+                </div>
+                <Link to="/profile">
+                  <Button size="sm" variant="outline">
+                    <Settings2 className="w-3.5 h-3.5" /> Configurar <ArrowRight className="w-3.5 h-3.5" />
+                  </Button>
+                </Link>
+              </div>
+            </Card>
           )}
-        </>
-      ) : (
-        <Card className="p-8 text-center text-sm text-muted-foreground">
-          Configura o teu treino no perfil para começar a usar o coach AI.
-        </Card>
-      )}
+
+          <Card className="p-5 bg-gradient-to-br from-primary/10 via-background to-background border-primary/30 space-y-4">
+            <div className="flex items-center gap-2">
+              <Brain className="w-5 h-5 text-primary" />
+              <h2 className="text-base font-semibold">{t("coach.how.title")}</h2>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <HowItem icon={Sun} title={t("coach.how.daily.title")} desc={t("coach.how.daily.desc")} />
+              <HowItem icon={RefreshCw} title={t("coach.how.adapt.title")} desc={t("coach.how.adapt.desc")} />
+              <HowItem icon={ClipboardCheck} title={t("coach.how.feedback.title")} desc={t("coach.how.feedback.desc")} />
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Link to="/dashboard"><Button size="sm" variant="outline">Dashboard</Button></Link>
+              <Link to="/calendar"><Button size="sm">{t("coach.how.cta")} <ArrowRight className="w-3.5 h-3.5" /></Button></Link>
+            </div>
+          </Card>
+
+          {trainingConfigured ? (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatCard label={t("coach.dailyCount")} value={counts.daily} icon={Sun} />
+                <StatCard label={t("coach.adaptCount")} value={counts.adapt} icon={RefreshCw} />
+                <StatCard label={t("coach.quickAnalyses")} value={counts.quick} icon={Sparkles} />
+                <StatCard label={t("coach.deepAnalyses")} value={counts.deep} icon={Brain} />
+              </div>
+
+              <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+                <TabsList className="flex-wrap h-auto">
+                  <TabsTrigger value="all">{t("coach.tab.all")}</TabsTrigger>
+                  <TabsTrigger value="daily">{t("coach.tab.daily")}</TabsTrigger>
+                  <TabsTrigger value="adapt">{t("coach.tab.adapt")}</TabsTrigger>
+                  <TabsTrigger value="quick">{t("coach.tab.quick")}</TabsTrigger>
+                  <TabsTrigger value="deep">{t("coach.tab.deep")}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {filtered.length === 0 ? (
+                <Card className="p-8 text-center text-sm text-muted-foreground">{t("coach.empty")}</Card>
+              ) : (
+                <div className="space-y-3">
+                  {filtered.map((row) => (
+                    <FeedbackItem key={row.id} row={row} expanded={expanded.has(row.id)}
+                      onToggle={() => toggle(row.id)} onDelete={() => remove(row.id)} dateLocale={dateLocale} />
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <Card className="p-8 text-center text-sm text-muted-foreground">
+              Configura o teu treino no perfil para começar a usar o coach AI.
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* Tab Mensagens */}
+        <TabsContent value="messages" className="mt-4">
+          <MessagesPage />
+        </TabsContent>
+
+        {/* Tab Biblioteca */}
+        <TabsContent value="library" className="mt-4">
+          <LibraryPage />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -260,14 +257,8 @@ function typeMeta(t: (k: string) => string, type: string): { label: string; icon
   return { label: type, icon: Brain, color: "" };
 }
 
-function FeedbackItem({
-  row, expanded, onToggle, onDelete, dateLocale,
-}: {
-  row: FeedbackRow;
-  expanded: boolean;
-  onToggle: () => void;
-  onDelete: () => void;
-  dateLocale: typeof pt;
+function FeedbackItem({ row, expanded, onToggle, onDelete, dateLocale }: {
+  row: FeedbackRow; expanded: boolean; onToggle: () => void; onDelete: () => void; dateLocale: typeof pt;
 }) {
   const { t } = useLanguage();
   const isWorkout = row.feedback_type === "workout_deep" || row.feedback_type === "workout_quick";
@@ -294,9 +285,7 @@ function FeedbackItem({
                 <TypeIcon className="w-3 h-3 mr-1" /> {tMeta.label}
               </Badge>
               {isWorkout && (
-                <Badge variant="outline" className={`text-[10px] ${vMeta.color}`}>
-                  {t(vMeta.key)}
-                </Badge>
+                <Badge variant="outline" className={`text-[10px] ${vMeta.color}`}>{t(vMeta.key)}</Badge>
               )}
               {adaptations.length > 0 && (
                 <Badge variant="outline" className="text-[10px] border-primary/40 text-primary">
@@ -304,12 +293,8 @@ function FeedbackItem({
                 </Badge>
               )}
             </div>
-            {planned?.title && (
-              <div className="text-sm font-medium truncate">{planned.title}</div>
-            )}
-            <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-              {row.reasoning || row.decision}
-            </div>
+            {planned?.title && <div className="text-sm font-medium truncate">{planned.title}</div>}
+            <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{row.reasoning || row.decision}</div>
           </div>
           {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
         </div>
@@ -318,11 +303,9 @@ function FeedbackItem({
       {expanded && (
         <div className="mt-4 pt-4 border-t border-border/40 space-y-3 text-sm">
           {isWorkout && result ? (
-            isDeep ? (
-              <p className="leading-relaxed">{(result as DeepFeedback).summary}</p>
-            ) : (
-              <p className="font-medium">{(result as QuickFeedback).headline}</p>
-            )
+            isDeep
+              ? <p className="leading-relaxed">{(result as DeepFeedback).summary}</p>
+              : <p className="font-medium">{(result as QuickFeedback).headline}</p>
           ) : (
             <p className="leading-relaxed whitespace-pre-wrap">{row.reasoning || row.decision}</p>
           )}
@@ -353,13 +336,11 @@ function FeedbackItem({
               <ul className="text-xs space-y-1">{result.improvements.map((h, i) => <li key={i}>• {h}</li>)}</ul>
             </div>
           )}
-
           {isWorkout && !isDeep && result && (result as QuickFeedback).next_session_tip && (
             <div className="text-xs italic text-muted-foreground border-t border-border/40 pt-2">
               💡 {(result as QuickFeedback).next_session_tip}
             </div>
           )}
-
           {adaptations.length > 0 && (
             <div className="space-y-2">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t("coach.adaptationsProposed")}</div>
@@ -373,7 +354,6 @@ function FeedbackItem({
               ))}
             </div>
           )}
-
           <div className="flex justify-end pt-2">
             <Button size="sm" variant="ghost" onClick={onDelete} className="text-destructive hover:text-destructive">
               <Trash2 className="w-3 h-3" /> {t("common.remove")}
