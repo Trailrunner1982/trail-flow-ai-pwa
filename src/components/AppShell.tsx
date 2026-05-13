@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Mountain, LayoutDashboard, Flag, HeartPulse, Calendar, Brain, LogOut, Users, Library, User, Inbox, Dumbbell, Menu, BookOpen, MessageCircle } from "lucide-react";
+import { Mountain, LayoutDashboard, Flag, HeartPulse, Calendar, Brain, LogOut, Users, Library, User, Inbox, Menu, BookOpen } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -13,16 +13,23 @@ import { FeedbackButton } from "./FeedbackButton";
 import { InstallPWA } from "./InstallPWA";
 import { useState } from "react";
 
-const NAV = [
+// Sidebar desktop — todos os itens
+const NAV_DESKTOP = [
   { to: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { to: "/races", labelKey: "nav.races", icon: Flag },
   { to: "/biometrics", labelKey: "nav.biometrics", icon: HeartPulse },
   { to: "/calendar", labelKey: "nav.workouts", icon: Calendar },
-  { to: "/strength", labelKey: "nav.strength", icon: Dumbbell },
-  { to: "/library", labelKey: "nav.library", icon: BookOpen },
-  { to: "/messages", labelKey: "nav.messages", icon: MessageCircle },
   { to: "/coach", labelKey: "nav.coach", icon: Brain },
   { to: "/profile", labelKey: "nav.profile", icon: User },
+];
+
+// Bottom nav mobile — apenas 5 itens
+const NAV_MOBILE = [
+  { to: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
+  { to: "/races", labelKey: "nav.races", icon: Flag },
+  { to: "/biometrics", labelKey: "nav.biometrics", icon: HeartPulse },
+  { to: "/calendar", labelKey: "nav.workouts", icon: Calendar },
+  { to: "/coach", labelKey: "nav.coach", icon: Brain },
 ];
 
 export function AppShell() {
@@ -58,7 +65,7 @@ export function AppShell() {
             </div>
           </div>
           <nav className="flex flex-col gap-1 flex-1 overflow-y-auto">
-            {NAV.map((item) => (
+            {NAV_DESKTOP.map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
@@ -136,10 +143,10 @@ export function AppShell() {
           </div>
         </main>
 
-        {/* Mobile bottom nav */}
+        {/* Mobile bottom nav — 5 itens */}
         <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border/60 bg-card/95 backdrop-blur-lg">
-          <div className="grid grid-cols-9">
-            {NAV.map((item) => (
+          <div className="grid grid-cols-5">
+            {NAV_MOBILE.map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) =>
                 `flex flex-col items-center justify-center gap-1 py-3 text-[10px] font-medium transition-colors ${
                   isActive ? "text-primary" : "text-muted-foreground"
