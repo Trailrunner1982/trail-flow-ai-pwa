@@ -25,6 +25,7 @@ import { pt, enUS } from "date-fns/locale";
 import { toast } from "sonner";
 import { generatePlan } from "@/lib/planner";
 import { useLanguage } from "@/lib/i18n";
+import { generatePlan, parseDateLocal } from "@/lib/planner";
 
 type Priority = "A" | "B" | "C";
 type GoalType = "finish" | "target_time" | "target_pace" | "target_distance" | "target_elevation";
@@ -224,10 +225,32 @@ export default function RacesPage() {
         if (!confirm(`Já existem ${count} treinos futuros. Substituir pelo novo plano?`)) { setGeneratingId(null); return; }
         await supabase.from("planned_workouts").delete().eq("user_id", userId).gte("workout_date", format(startDate, "yyyy-MM-dd"));
       }
-      const generated = generatePlan({
-        startDate, raceDate, raceDistanceKm: Number(race.distance_km), raceElevationM: race.elevation_gain_m,
-        terrainProfile: race.terrain_profile, baselineKmPerWeek: baselineKm, baselineAvgPaceSecPerKm: baselinePace,
-      });
+// Buscar provas B e C para incluir como marcos
+const { data: otherRaces } = await supabase
+  .from("races")
+  .select("name, race_date, priority")
+  .eq("user_id", userId)
+  .in("priority", ["B", "C"])
+  .gte("race_date", format(startDate, "yyyy-MM-dd"))
+  .lte("race_date", race.race_date);
+
+const secondaryRaces = (otherRaces ?? []).map((r: any) => ({
+  date: r.race_date,
+  name: r.name,
+  priority: r.priority as "B" | "C",
+}));
+
+const generated = generatePlan({
+  startDate,
+  raceDate: parseDateLocal(race.race_date),
+  raceDistanceKm: Number(race.distance_km),
+  raceElevationM: race.elevation_gain_m,
+  terrainProfile: race.terrain_profile,
+  baselineKmPerWeek: baselineKm,
+  baselineAvgPaceSecPerKm: baselinePace,
+  raceName: race.name,
+  secondaryRaces,
+});
       const rows = generated.map((w) => ({ ...w, user_id: userId, race_id: race.id }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
       if (error) throw error;
