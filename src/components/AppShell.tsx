@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Mountain, LayoutDashboard, Flag, HeartPulse, Calendar, Brain, LogOut, Users, Library, User, Inbox, Dumbbell, Menu, BookOpen } from "lucide-react";
+import { Mountain, LayoutDashboard, Flag, HeartPulse, Calendar, Brain, LogOut, Users, Library, User, Inbox, Dumbbell, Menu, BookOpen, MessageCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -20,6 +20,7 @@ const NAV = [
   { to: "/calendar", labelKey: "nav.workouts", icon: Calendar },
   { to: "/strength", labelKey: "nav.strength", icon: Dumbbell },
   { to: "/library", labelKey: "nav.library", icon: BookOpen },
+  { to: "/messages", labelKey: "nav.messages", icon: MessageCircle },
   { to: "/coach", labelKey: "nav.coach", icon: Brain },
   { to: "/profile", labelKey: "nav.profile", icon: User },
 ];
@@ -137,7 +138,7 @@ export function AppShell() {
 
         {/* Mobile bottom nav */}
         <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border/60 bg-card/95 backdrop-blur-lg">
-          <div className="grid grid-cols-8">
+          <div className="grid grid-cols-9">
             {NAV.map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) =>
                 `flex flex-col items-center justify-center gap-1 py-3 text-[10px] font-medium transition-colors ${
