@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { generatePlan, parseDateLocal } from "@/lib/planner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -24,9 +23,8 @@ import { RaceFuelingDialog } from "@/components/RaceFuelingDialog";
 import { format, differenceInWeeks, parseISO, addWeeks } from "date-fns";
 import { pt, enUS } from "date-fns/locale";
 import { toast } from "sonner";
-import { generatePlan } from "@/lib/planner";
-import { useLanguage } from "@/lib/i18n";
 import { generatePlan, parseDateLocal } from "@/lib/planner";
+import { useLanguage } from "@/lib/i18n";
 
 type Priority = "A" | "B" | "C";
 type GoalType = "finish" | "target_time" | "target_pace" | "target_distance" | "target_elevation";
@@ -112,11 +110,7 @@ export default function RacesPage() {
 
   useEffect(() => { fetchRaces(); }, [fetchRaces]);
 
-  const openCreate = () => {
-    setEditing(null);
-    setForm(emptyForm);
-    setOpen(true);
-  };
+  const openCreate = () => { setEditing(null); setForm(emptyForm); setOpen(true); };
 
   const openEdit = (r: Race) => {
     setEditing(r);
@@ -217,56 +211,43 @@ export default function RacesPage() {
       const baselineKm = Number(profile?.baseline_km_per_week ?? 30);
       const baselinePace = Number(profile?.baseline_avg_pace_sec_per_km ?? 360);
       const startDate = new Date();
-      const raceDate = parseISO(race.race_date);
+      const raceDate = parseDateLocal(race.race_date);
       const weeks = differenceInWeeks(raceDate, startDate);
       if (weeks < 1) { toast.error("A data da prova já passou ou é demasiado próxima"); return; }
+
       const { count } = await supabase.from("planned_workouts")
-        .select("id", { count: "exact", head: true }).eq("user_id", userId).gte("workout_date", format(startDate, "yyyy-MM-dd"));
+        .select("id", { count: "exact", head: true }).eq("user_id", userId)
+        .gte("workout_date", format(startDate, "yyyy-MM-dd"));
       if ((count ?? 0) > 0) {
         if (!confirm(`Já existem ${count} treinos futuros. Substituir pelo novo plano?`)) { setGeneratingId(null); return; }
-        await supabase.from("planned_workouts").delete().eq("user_id", userId).gte("workout_date", format(startDate, "yyyy-MM-dd"));
+        await supabase.from("planned_workouts").delete().eq("user_id", userId)
+          .gte("workout_date", format(startDate, "yyyy-MM-dd"));
       }
-// Buscar provas B e C para incluir como marcos
-const { data: otherRaces } = await supabase
-  .from("races")
-  .select("name, race_date, priority")
-  .eq("user_id", userId)
-  .in("priority", ["B", "C"])
-  .gte("race_date", format(startDate, "yyyy-MM-dd"))
-  .lte("race_date", race.race_date);
 
-const secondaryRaces = (otherRaces ?? []).map((r: any) => ({
-  date: r.race_date,
-  name: r.name,
-  priority: r.priority as "B" | "C",
-}));
+      const { data: otherRaces } = await supabase
+        .from("races").select("name, race_date, priority")
+        .eq("user_id", userId).in("priority", ["B", "C"])
+        .gte("race_date", format(startDate, "yyyy-MM-dd"))
+        .lte("race_date", race.race_date);
 
-// Buscar provas B e C como marcos
-const { data: otherRaces } = await supabase
-  .from("races")
-  .select("name, race_date, priority")
-  .eq("user_id", userId)
-  .in("priority", ["B", "C"])
-  .gte("race_date", format(startDate, "yyyy-MM-dd"))
-  .lte("race_date", race.race_date);
+      const secondaryRaces = (otherRaces ?? []).map((r: any) => ({
+        date: r.race_date,
+        name: r.name,
+        priority: r.priority as "B" | "C",
+      }));
 
-const secondaryRaces = (otherRaces ?? []).map((r: any) => ({
-  date: r.race_date,
-  name: r.name,
-  priority: r.priority as "B" | "C",
-}));
+      const generated = generatePlan({
+        startDate,
+        raceDate,
+        raceDistanceKm: Number(race.distance_km),
+        raceElevationM: race.elevation_gain_m,
+        terrainProfile: race.terrain_profile,
+        baselineKmPerWeek: baselineKm,
+        baselineAvgPaceSecPerKm: baselinePace,
+        raceName: race.name,
+        secondaryRaces,
+      });
 
-const generated = generatePlan({
-  startDate,
-  raceDate: parseDateLocal(race.race_date),
-  raceDistanceKm: Number(race.distance_km),
-  raceElevationM: race.elevation_gain_m,
-  terrainProfile: race.terrain_profile,
-  baselineKmPerWeek: baselineKm,
-  baselineAvgPaceSecPerKm: baselinePace,
-  raceName: race.name,
-  secondaryRaces,
-});
       const rows = generated.map((w) => ({ ...w, user_id: userId, race_id: race.id }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
       if (error) throw error;
@@ -335,8 +316,6 @@ const generated = generatePlan({
                       )}
                     </div>
                     {r.notes && <p className="text-sm text-muted-foreground mt-2">{r.notes}</p>}
-
-                    {/* Resultado */}
                     {hasResult && (
                       <div className="flex flex-wrap gap-2 mt-3 pt-2 border-t border-border/40">
                         <Trophy className="w-3.5 h-3.5 text-amber-500 mt-0.5" />
@@ -345,9 +324,7 @@ const generated = generatePlan({
                             {Math.floor(r.result_time_min / 60)}h{(r.result_time_min % 60).toString().padStart(2, "0")}
                           </Badge>
                         )}
-                        {r.result_position && (
-                          <Badge variant="outline" className="text-xs">#{r.result_position}</Badge>
-                        )}
+                        {r.result_position && <Badge variant="outline" className="text-xs">#{r.result_position}</Badge>}
                         {r.itra_points && (
                           <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">
                             ITRA {r.itra_points} pts
@@ -372,12 +349,8 @@ const generated = generatePlan({
                         </Button>
                       </>
                     )}
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setDeleteId(r.id)}>
-                      <Trash2 className="w-4 h-4 text-destructive" />
-                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => openEdit(r)}><Pencil className="w-4 h-4" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => setDeleteId(r.id)}><Trash2 className="w-4 h-4 text-destructive" /></Button>
                   </div>
                 </div>
               </Card>
@@ -440,11 +413,13 @@ const generated = generatePlan({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label>Distância (km)</Label>
-                <Input type="number" step="0.1" inputMode="decimal" value={form.distance_km} onChange={(e) => setForm({ ...form, distance_km: e.target.value })} />
+                <Input type="number" step="0.1" inputMode="decimal" value={form.distance_km}
+                  onChange={(e) => setForm({ ...form, distance_km: e.target.value })} />
               </div>
               <div>
                 <Label>Altimetria D+ (m)</Label>
-                <Input type="number" inputMode="numeric" value={form.elevation_gain_m} onChange={(e) => setForm({ ...form, elevation_gain_m: e.target.value })} />
+                <Input type="number" inputMode="numeric" value={form.elevation_gain_m}
+                  onChange={(e) => setForm({ ...form, elevation_gain_m: e.target.value })} />
               </div>
             </div>
             {form.race_type === "official" && (
@@ -477,10 +452,9 @@ const generated = generatePlan({
             )}
             <div>
               <Label>Notas</Label>
-              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} placeholder="Link, perfil, comentários…" />
+              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                rows={3} placeholder="Link, perfil, comentários…" />
             </div>
-
-            {/* Resultado e ITRA/ATRP */}
             {form.race_type === "official" && (
               <div className="border-t border-border/40 pt-4 space-y-3">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold flex items-center gap-2">
@@ -526,7 +500,7 @@ const generated = generatePlan({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remover prova?</AlertDialogTitle>
-            <AlertDialogDescription>Esta ação não pode ser desfeita. Os treinos planeados associados não são apagados.</AlertDialogDescription>
+            <AlertDialogDescription>Esta ação não pode ser desfeita.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
@@ -586,7 +560,8 @@ const generated = generatePlan({
                       <div className="text-xs text-amber-500">
                         Precisas de pelo menos {minWeeks} semanas. Sugestão: <span className="font-mono font-bold">{suggested}</span>
                       </div>
-                      <Button size="sm" variant="outline" className="w-full border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
+                      <Button size="sm" variant="outline"
+                        className="w-full border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
                         onClick={async () => {
                           if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
                           const { error } = await supabase.from("races").update({ race_date: suggested }).eq("id", viability.race.id);
