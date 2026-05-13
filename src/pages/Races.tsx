@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { generatePlan, parseDateLocal } from "@/lib/planner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -241,15 +242,13 @@ const secondaryRaces = (otherRaces ?? []).map((r: any) => ({
 }));
 
 const generated = generatePlan({
-  startDate,
-  raceDate: parseDateLocal(race.race_date),
+ startDate,
+  raceDate,
   raceDistanceKm: Number(race.distance_km),
   raceElevationM: race.elevation_gain_m,
   terrainProfile: race.terrain_profile,
   baselineKmPerWeek: baselineKm,
   baselineAvgPaceSecPerKm: baselinePace,
-  raceName: race.name,
-  secondaryRaces,
 });
       const rows = generated.map((w) => ({ ...w, user_id: userId, race_id: race.id }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
