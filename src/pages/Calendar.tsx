@@ -5,6 +5,7 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import type {
   AdaptationProposal,
@@ -15,12 +16,12 @@ import type {
 import { generatePlan } from "@/lib/planner";
 import { addDays, format } from "date-fns";
 import { Calendar as CalendarIcon, Sparkles, Dumbbell } from "lucide-react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { FreeWorkoutDialog } from "@/components/FreeWorkoutDialog";
 import { useLanguage } from "@/lib/i18n";
 import { AdaptPlanCard } from "@/components/AdaptPlanCard";
 import { computeReadiness } from "./Biometrics";
+import StrengthPage from "./Strength";
 
 export default function CalendarPage() {
   const { userId, canWrite } = useEffectiveUser();
@@ -31,6 +32,7 @@ export default function CalendarPage() {
   const [todayBio, setTodayBio] = useState<any>(null);
   const [nextRaceA, setNextRaceA] = useState<any>(null);
   const [generating, setGenerating] = useState(false);
+  const [tab, setTab] = useState("workouts");
 
   const fetchAll = useCallback(async () => {
     if (!userId) return;
@@ -49,15 +51,12 @@ export default function CalendarPage() {
     setLoading(false);
   }, [userId]);
 
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const storage: CalendarStorage = useMemo(() => ({
     saveCompleted: async (plannedWO, data) => {
       if (!userId) throw new Error("Not authenticated");
       if (!canWrite) throw new Error("Modo Espelho — leitura apenas");
-      // Upsert by planned_workout_id when present, else by date
       const existing = completed.find(
         (x) =>
           (plannedWO.id && x.planned_workout_id === plannedWO.id) ||
@@ -78,11 +77,7 @@ export default function CalendarPage() {
           .select()
           .single();
         if (error) throw error;
-        await supabase
-          .from("planned_workouts")
-          .update({ is_completed: true })
-          .eq("id", plannedWO.id ?? "")
-          .then(() => null);
+        await supabase.from("planned_workouts").update({ is_completed: true }).eq("id", plannedWO.id ?? "").then(() => null);
         return upd as any;
       }
       const { data: ins, error } = await supabase
@@ -124,10 +119,9 @@ export default function CalendarPage() {
     persistFeedback: async (mode, plannedWO, executed, result) => {
       if (!userId || !canWrite) return;
       const r: any = result;
-      const decision =
-        mode === "deep"
-          ? `${r.verdict?.toUpperCase()} · ${r.adaptations?.length ?? 0} readaptaç${(r.adaptations?.length ?? 0) === 1 ? "ão" : "ões"} proposta(s)`
-          : `${r.verdict?.toUpperCase()} · ${r.headline ?? ""}`;
+      const decision = mode === "deep"
+        ? `${r.verdict?.toUpperCase()} · ${r.adaptations?.length ?? 0} readaptaç${(r.adaptations?.length ?? 0) === 1 ? "ão" : "ões"} proposta(s)`
+        : `${r.verdict?.toUpperCase()} · ${r.headline ?? ""}`;
       const reasoning = mode === "deep" ? (r.summary ?? "") : (r.next_session_tip ?? "");
       await supabase.from("ai_feedback").insert({
         user_id: userId,
@@ -148,13 +142,8 @@ export default function CalendarPage() {
       const startDate = new Date();
       const raceDate = addDays(startDate, 84);
       const generated = generatePlan({
-        startDate,
-        raceDate,
-        raceDistanceKm: 42,
-        raceElevationM: 2000,
-        terrainProfile: "mixed",
-        baselineKmPerWeek: 35,
-        baselineAvgPaceSecPerKm: 330,
+        startDate, raceDate, raceDistanceKm: 42, raceElevationM: 2000,
+        terrainProfile: "mixed", baselineKmPerWeek: 35, baselineAvgPaceSecPerKm: 330,
       });
       const rows = generated.map((w) => ({ ...w, user_id: userId }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
@@ -175,39 +164,55 @@ export default function CalendarPage() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-            <CalendarIcon className="w-6 h-6 text-primary" /> {t("cal.title")}
+            <CalendarIcon className="w-6 h-6 text-primary" /> Treinos
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">{t("cal.subtitle")}</p>
+          <p className="text-sm text-muted-foreground mt-1">Plano de corrida e sessões de força.</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Badge variant="secondary">{planned.length} {t("cal.workouts")}</Badge>
-          <Badge variant="outline">{completed.length} {t("cal.done")}</Badge>
-          <Button asChild variant="outline" size="sm">
-            <Link to="/strength"><Dumbbell className="w-4 h-4" /> {t("nav.strength")}</Link>
-          </Button>
-          {userId && <FreeWorkoutDialog userId={userId} canWrite={canWrite} onSaved={fetchAll} />}
-        </div>
+        {tab === "workouts" && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="secondary">{planned.length} {t("cal.workouts")}</Badge>
+            <Badge variant="outline">{completed.length} {t("cal.done")}</Badge>
+            {userId && <FreeWorkoutDialog userId={userId} canWrite={canWrite} onSaved={fetchAll} />}
+          </div>
+        )}
       </div>
 
-      {planned.length === 0 ? (
-        <Card className="p-8 text-center space-y-4">
-          <div className="text-lg font-medium">{t("cal.noPlan")}</div>
-          <p className="text-sm text-muted-foreground max-w-md mx-auto">{t("cal.demoHint")}</p>
-          <Button onClick={handleGenerateDemo} disabled={generating}>
-            <Sparkles className="w-4 h-4" /> {t("cal.generateDemo")}
-          </Button>
-        </Card>
-      ) : (
-        <>
-          <AdaptPlanCard
-            todayBio={todayBio}
-            readiness={todayBio ? computeReadiness(todayBio) : null}
-            nextRace={nextRaceA}
-            onApplied={fetchAll}
-          />
-          <CalendarView planned={planned} completed={completed} storage={storage} onChanged={fetchAll} />
-        </>
-      )}
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="workouts">
+            <CalendarIcon className="w-3.5 h-3.5 mr-1.5" /> Calendário
+          </TabsTrigger>
+          <TabsTrigger value="strength">
+            <Dumbbell className="w-3.5 h-3.5 mr-1.5" /> Força
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="workouts" className="mt-4">
+          {planned.length === 0 ? (
+            <Card className="p-8 text-center space-y-4">
+              <div className="text-lg font-medium">{t("cal.noPlan")}</div>
+              <p className="text-sm text-muted-foreground max-w-md mx-auto">{t("cal.demoHint")}</p>
+              <Button onClick={handleGenerateDemo} disabled={generating}>
+                <Sparkles className="w-4 h-4" /> {t("cal.generateDemo")}
+              </Button>
+            </Card>
+          ) : (
+            <>
+              <AdaptPlanCard
+                todayBio={todayBio}
+                readiness={todayBio ? computeReadiness(todayBio) : null}
+                nextRace={nextRaceA}
+                onApplied={fetchAll}
+              />
+              <CalendarView planned={planned} completed={completed} storage={storage} onChanged={fetchAll} />
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="strength" className="mt-4">
+          <StrengthPage />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
