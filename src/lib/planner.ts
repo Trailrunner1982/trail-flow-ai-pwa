@@ -263,7 +263,7 @@ export function formatPace(secPerKm: number | null): string {
 
 export function formatDuration(minutes: number | null): string {
   if (!minutes) return "--";
-  const h = Math.floor(minutes / / 60);
+  const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return h > 0 ? `${h}h${m.toString().padStart(2, "0")}` : `${m}min`;
 }
