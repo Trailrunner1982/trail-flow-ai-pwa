@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { calculateBMI, calculateMetabolicAge, calculateZones } from "@/lib/training";
 import { fmtPace } from "@/lib/format";
-import { User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2, Activity } from "lucide-react";
+import { User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2, Activity, Mountain } from "lucide-react";
 import { toast } from "sonner";
 import { differenceInYears, format, subDays } from "date-fns";
 import { useLanguage } from "@/lib/i18n";
@@ -31,6 +31,10 @@ interface Profile {
   long_run_day: number | null;
   avatar_url: string | null;
   strava_athlete_id: number | null;
+  atrp_number: string | null;
+  itra_id: string | null;
+  itra_performance_index: number | null;
+  itra_profile_url: string | null;
 }
 
 interface WeightEntry {
@@ -84,6 +88,7 @@ export default function ProfilePage() {
   const [pwdSaving, setPwdSaving] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingTraining, setEditingTraining] = useState(false);
+  const [editingItra, setEditingItra] = useState(false);
   const [weightHistory, setWeightHistory] = useState<WeightEntry[]>([]);
   const [newWeight, setNewWeight] = useState("");
   const [paceInput, setPaceInput] = useState("");
@@ -96,6 +101,7 @@ export default function ProfilePage() {
     baseline_avg_pace_sec_per_km: null, baseline_km_per_week: null,
     available_run_days: [1,2,3,4,5,6], available_strength_days: [2,4], long_run_day: 6,
     avatar_url: null, strava_athlete_id: null,
+    atrp_number: null, itra_id: null, itra_performance_index: null, itra_profile_url: null,
   });
 
   const DAYS = [
@@ -119,6 +125,10 @@ export default function ProfilePage() {
         long_run_day: data.long_run_day ?? 6,
         avatar_url: (data as any).avatar_url ?? null,
         strava_athlete_id: (data as any).strava_athlete_id ?? null,
+        atrp_number: (data as any).atrp_number ?? null,
+        itra_id: (data as any).itra_id ?? null,
+        itra_performance_index: (data as any).itra_performance_index ?? null,
+        itra_profile_url: (data as any).itra_profile_url ?? null,
       });
       setPaceInput(secToPaceInput(data.baseline_avg_pace_sec_per_km));
       if ((data as any).strava_athlete_id) setStravaConnected(true);
@@ -133,13 +143,11 @@ export default function ProfilePage() {
       .not("weight_kg", "is", null)
       .order("measurement_date", { ascending: true });
     setWeightHistory((wData ?? []).map((r: any) => ({ id: r.id, date: r.measurement_date, weight_kg: r.weight_kg })));
-
     setLoading(false);
   }, [userId]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Processar callback do Strava
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
@@ -180,7 +188,7 @@ export default function ProfilePage() {
     const age = form.date_of_birth ? differenceInYears(new Date(), new Date(form.date_of_birth)) : null;
     const metabolic_age = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi) : null;
     const { strava_athlete_id, ...formWithoutStrava } = form;
-const { error } = await supabase.from("profiles").update({ ...formWithoutStrava, metabolic_age }).eq("id", userId);
+    const { error } = await supabase.from("profiles").update({ ...formWithoutStrava, metabolic_age }).eq("id", userId);
     if (form.max_hr && form.resting_hr && form.baseline_avg_pace_sec_per_km) {
       const z = calculateZones(form.max_hr, form.resting_hr, form.baseline_avg_pace_sec_per_km);
       await supabase.from("training_zones").upsert({
@@ -197,6 +205,7 @@ const { error } = await supabase.from("profiles").update({ ...formWithoutStrava,
     toast.success(t("profile.toast.updated"));
     setEditingProfile(false);
     setEditingTraining(false);
+    setEditingItra(false);
     load();
   };
 
@@ -225,12 +234,7 @@ const { error } = await supabase.from("profiles").update({ ...formWithoutStrava,
 
   const handlePasswordChange = async () => {
     if (!canWrite) return toast.error(t("common.readonly"));
-    const checks = [
-      pwd.length >= 8,
-      /[A-Z]/.test(pwd),
-      /[a-z]/.test(pwd),
-      /[0-9]/.test(pwd),
-    ];
+    const checks = [pwd.length >= 8, /[A-Z]/.test(pwd), /[a-z]/.test(pwd), /[0-9]/.test(pwd)];
     if (!checks[0]) return toast.error("A password tem de ter pelo menos 8 caracteres");
     if (!checks[1]) return toast.error("Inclui pelo menos uma letra maiúscula (A-Z)");
     if (!checks[2]) return toast.error("Inclui pelo menos uma letra minúscula (a-z)");
@@ -247,12 +251,8 @@ const { error } = await supabase.from("profiles").update({ ...formWithoutStrava,
   const handleAddWeight = async () => {
     if (!userId || !newWeight) return;
     const today = format(new Date(), "yyyy-MM-dd");
-    const existing = await supabase
-      .from("daily_biometrics")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("measurement_date", today)
-      .maybeSingle();
+    const existing = await supabase.from("daily_biometrics").select("id")
+      .eq("user_id", userId).eq("measurement_date", today).maybeSingle();
     if (existing.data?.id) {
       await supabase.from("daily_biometrics").update({ weight_kg: Number(newWeight) }).eq("id", existing.data.id);
     } else {
@@ -278,16 +278,10 @@ const { error } = await supabase.from("profiles").update({ ...formWithoutStrava,
     if (b < 30) return t("profile.bmi.high");
     return t("profile.bmi.obese");
   };
-
   const firstWeight = weightHistory[0]?.weight_kg;
   const lastWeight = weightHistory[weightHistory.length - 1]?.weight_kg;
   const weightDelta = firstWeight && lastWeight && firstWeight !== lastWeight ? (lastWeight - firstWeight).toFixed(1) : null;
-
-  const trainingConfigured = !!(
-    form.baseline_km_per_week &&
-    form.baseline_avg_pace_sec_per_km &&
-    form.available_run_days?.length
-  );
+  const trainingConfigured = !!(form.baseline_km_per_week && form.baseline_avg_pace_sec_per_km && form.available_run_days?.length);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -308,6 +302,12 @@ const { error } = await supabase.from("profiles").update({ ...formWithoutStrava,
           <div className="font-semibold text-lg">{form.full_name || t("profile.noName")}</div>
           {age && <div className="text-sm text-muted-foreground">{age} anos</div>}
           {currentWeight && <div className="text-sm text-muted-foreground">{currentWeight} kg · {form.height_cm} cm</div>}
+          {form.itra_performance_index && (
+            <div className="text-xs text-muted-foreground mt-1">
+              ITRA {form.itra_performance_index} pts
+              {form.atrp_number && ` · ATRP ${form.atrp_number}`}
+            </div>
+          )}
           <p className="text-xs text-muted-foreground mt-1">{t("profile.photoHint")}</p>
         </div>
         <div className="flex flex-col gap-2">
@@ -378,32 +378,92 @@ const { error } = await supabase.from("profiles").update({ ...formWithoutStrava,
             <Activity className="w-4 h-4 text-orange-500" /> Strava
             <Tooltip2 text="Liga o teu Strava para importar automaticamente as tuas atividades dos últimos 90 dias. Funciona com Garmin, Coros, Suunto e Polar." />
           </h3>
-          {stravaConnected && (
-            <Badge className="bg-orange-500/15 text-orange-500 border-orange-500/30">
-              ✓ Ligado
-            </Badge>
-          )}
+          {stravaConnected && <Badge className="bg-orange-500/15 text-orange-500 border-orange-500/30">✓ Ligado</Badge>}
         </div>
         {stravaConnected ? (
-          <p className="text-xs text-muted-foreground">
-            O Strava está ligado. As tuas atividades são importadas automaticamente para Treinos Livres.
-          </p>
+          <p className="text-xs text-muted-foreground">O Strava está ligado. As tuas atividades são importadas automaticamente para Treinos Livres.</p>
         ) : (
           <>
-            <p className="text-xs text-muted-foreground">
-              Liga o teu Strava para importar atividades de Garmin, Coros, Suunto e Polar automaticamente.
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={connectStrava}
-              disabled={stravaImporting}
-              className="gap-2 border-orange-500/40 text-orange-500 hover:bg-orange-500/10"
-            >
+            <p className="text-xs text-muted-foreground">Liga o teu Strava para importar atividades de Garmin, Coros, Suunto e Polar automaticamente.</p>
+            <Button variant="outline" size="sm" onClick={connectStrava} disabled={stravaImporting}
+              className="gap-2 border-orange-500/40 text-orange-500 hover:bg-orange-500/10">
               {stravaImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
               {stravaImporting ? "A importar..." : "Ligar Strava"}
             </Button>
           </>
+        )}
+      </Card>
+
+      {/* ITRA / ATRP */}
+      <Card className="p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Mountain className="w-4 h-4 text-primary" /> ITRA & ATRP
+            <Tooltip2 text="Performance Index ITRA e número de associado ATRP. Estes dados são usados pelo coach AI para calibrar os teus objetivos de prova." />
+          </h3>
+          <Button variant="outline" size="sm" onClick={() => setEditingItra(!editingItra)}>
+            <Settings2 className="w-3.5 h-3.5" /> {editingItra ? "Fechar" : "Editar"}
+          </Button>
+        </div>
+
+        {!editingItra && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">ITRA Performance Index</div>
+              <div className="font-semibold mt-1">{form.itra_performance_index ?? "—"}</div>
+            </div>
+            <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">ITRA ID</div>
+              <div className="font-semibold mt-1 truncate">{form.itra_id ?? "—"}</div>
+            </div>
+            <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Nº Associado ATRP</div>
+              <div className="font-semibold mt-1">{form.atrp_number ?? "—"}</div>
+            </div>
+            <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Perfil ITRA</div>
+              {form.itra_profile_url ? (
+                <a href={form.itra_profile_url} target="_blank" rel="noreferrer" className="text-primary text-xs underline mt-1 block">Ver perfil →</a>
+              ) : (
+                <div className="font-semibold mt-1">—</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {editingItra && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="ITRA Performance Index">
+                <Input type="number" inputMode="numeric" placeholder="ex: 650"
+                  value={form.itra_performance_index ?? ""}
+                  onChange={(e) => setForm({ ...form, itra_performance_index: num(e.target.value) })} />
+              </Field>
+              <Field label="ITRA ID (número de atleta)">
+                <Input placeholder="ex: 123456"
+                  value={form.itra_id ?? ""}
+                  onChange={(e) => setForm({ ...form, itra_id: e.target.value })} />
+              </Field>
+              <Field label="Nº Associado ATRP">
+                <Input placeholder="ex: ATRP-12345"
+                  value={form.atrp_number ?? ""}
+                  onChange={(e) => setForm({ ...form, atrp_number: e.target.value })} />
+              </Field>
+              <Field label="URL do perfil ITRA">
+                <Input placeholder="https://itra.run/Runners/..."
+                  value={form.itra_profile_url ?? ""}
+                  onChange={(e) => setForm({ ...form, itra_profile_url: e.target.value })} />
+              </Field>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              💡 Encontra o teu Performance Index em{" "}
+              <a href="https://itra.run" target="_blank" rel="noreferrer" className="text-primary underline">itra.run</a>
+              {" "}→ pesquisa o teu nome → abre o teu perfil.
+            </div>
+            <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
+            </Button>
+          </div>
         )}
       </Card>
 
