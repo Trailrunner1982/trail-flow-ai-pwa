@@ -179,7 +179,8 @@ export default function ProfilePage() {
     const bmi = currentWeight && form.height_cm ? calculateBMI(currentWeight, form.height_cm) : null;
     const age = form.date_of_birth ? differenceInYears(new Date(), new Date(form.date_of_birth)) : null;
     const metabolic_age = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi) : null;
-    const { error } = await supabase.from("profiles").update({ ...form, metabolic_age }).eq("id", userId);
+    const { strava_athlete_id, ...formWithoutStrava } = form;
+const { error } = await supabase.from("profiles").update({ ...formWithoutStrava, metabolic_age }).eq("id", userId);
     if (form.max_hr && form.resting_hr && form.baseline_avg_pace_sec_per_km) {
       const z = calculateZones(form.max_hr, form.resting_hr, form.baseline_avg_pace_sec_per_km);
       await supabase.from("training_zones").upsert({
