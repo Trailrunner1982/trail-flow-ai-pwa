@@ -13,30 +13,16 @@ import { format, parseISO } from "date-fns";
 import { useLanguage, getDateLocale } from "@/lib/i18n";
 import { workoutTypeLabel, zoneLabel, fmtDuration, fmtPace } from "@/lib/format";
 import {
-  Brain,
-  CheckCircle2,
-  Loader2,
-  Sparkles,
-  ThumbsUp,
-  AlertTriangle,
-  Mountain,
-  Clock,
-  Gauge,
-  Timer,
-  Apple,
-  Droplet,
+  Brain, CheckCircle2, Loader2, Sparkles, ThumbsUp, AlertTriangle,
+  Mountain, Clock, Gauge, Timer, Apple, Droplet, Activity,
 } from "lucide-react";
 import { CalendarX } from "lucide-react";
 import { getWorkoutNutrition } from "@/lib/nutrition";
 import { RescheduleDialog } from "./RescheduleDialog";
+import { useAuth } from "@/hooks/useAuth";
 import type {
-  CalendarCompletedWorkout,
-  CalendarPlannedWorkout,
-  CalendarStorage,
-  DeepFeedback,
-  QuickFeedback,
-  Verdict,
-  AdaptationProposal,
+  CalendarCompletedWorkout, CalendarPlannedWorkout, CalendarStorage,
+  DeepFeedback, QuickFeedback, Verdict, AdaptationProposal,
 } from "./types";
 
 interface Props {
@@ -44,10 +30,9 @@ interface Props {
   onOpenChange: (v: boolean) => void;
   planned: CalendarPlannedWorkout | null;
   existingCompleted?: CalendarCompletedWorkout | null;
-  upcoming: CalendarPlannedWorkout[]; // for "deep" mode
+  upcoming: CalendarPlannedWorkout[];
   storage: CalendarStorage;
   onSaved?: (c: CalendarCompletedWorkout) => void;
-  /** Optional context for reschedule flow */
   allPlanned?: CalendarPlannedWorkout[];
   allCompleted?: CalendarCompletedWorkout[];
   onReschedule?: () => void;
@@ -62,32 +47,21 @@ const verdictMeta: Record<Verdict, { label: string; color: string; icon: any }> 
 };
 
 export function WorkoutDetailDialog({
-  open,
-  onOpenChange,
-  planned,
-  existingCompleted,
-  upcoming,
-  storage,
-  onSaved,
-  allPlanned,
-  allCompleted,
-  onReschedule,
+  open, onOpenChange, planned, existingCompleted, upcoming, storage,
+  onSaved, allPlanned, allCompleted, onReschedule,
 }: Props) {
   const { t, lang } = useLanguage();
+  const { user } = useAuth();
   const dateLocale = getDateLocale(lang);
   const [tab, setTab] = useState<"plan" | "log" | "fuel">("plan");
   const [saving, setSaving] = useState(false);
   const [loadingFeedback, setLoadingFeedback] = useState<null | "quick" | "deep">(null);
   const [applying, setApplying] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [stravaActivity, setStravaActivity] = useState<any>(null);
 
   const [form, setForm] = useState({
-    distance: "",
-    elevation: "",
-    durationMin: "",
-    paceSec: "",
-    rpe: 5,
-    notes: "",
+    distance: "", elevation: "", durationMin: "", paceSec: "", rpe: 5, notes: "",
   });
 
   const [quick, setQuick] = useState<QuickFeedback | null>(null);
@@ -97,6 +71,7 @@ export function WorkoutDetailDialog({
     if (!open || !planned) return;
     setQuick(null);
     setDeep(null);
+    setStravaActivity(null);
     setTab(existingCompleted ? "log" : "plan");
     setForm({
       distance: existingCompleted?.actual_distance_km?.toString() ?? planned.target_distance_km?.toString() ?? "",
@@ -106,9 +81,36 @@ export function WorkoutDetailDialog({
       rpe: existingCompleted?.rpe ?? 5,
       notes: existingCompleted?.notes ?? "",
     });
-  }, [open, planned, existingCompleted]);
+
+    // Verificar se existe atividade do Strava no mesmo dia
+    if (user && !existingCompleted) {
+      supabase
+        .from("free_workouts")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("workout_date", planned.workout_date)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) setStravaActivity(data);
+        });
+    }
+  }, [open, planned, existingCompleted, user]);
 
   if (!planned) return null;
+
+  const applyStravaActivity = () => {
+    if (!stravaActivity) return;
+    setForm({
+      distance: stravaActivity.distance_km?.toString() ?? "",
+      elevation: stravaActivity.elevation_m?.toString() ?? "",
+      durationMin: stravaActivity.duration_min?.toString() ?? "",
+      paceSec: stravaActivity.avg_pace_sec_per_km?.toString() ?? "",
+      rpe: form.rpe,
+      notes: stravaActivity.notes ?? "",
+    });
+    setStravaActivity(null);
+    toast.success("Dados do Strava aplicados!");
+  };
 
   const buildExecutedPayload = (): Omit<CalendarCompletedWorkout, "workout_date"> => ({
     actual_distance_km: form.distance ? Number(form.distance) : null,
@@ -143,10 +145,7 @@ export function WorkoutDetailDialog({
       const { data, error } = await supabase.functions.invoke("coach-feedback", {
         body: {
           mode,
-          planned: {
-            ...planned,
-            description: planned.description,
-          },
+          planned: { ...planned, description: planned.description },
           executed,
           upcoming: mode === "deep" ? upcoming.slice(0, 14) : [],
         },
@@ -155,7 +154,6 @@ export function WorkoutDetailDialog({
       const result = data.result;
       if (mode === "quick") setQuick(result as QuickFeedback);
       else setDeep(result as DeepFeedback);
-      // Auto-persist (no-op in simulator)
       try {
         await storage.persistFeedback?.(mode, planned, executed, result);
       } catch (err) {
@@ -202,12 +200,9 @@ export function WorkoutDetailDialog({
           <DialogDescription>{workoutTypeLabel(planned.workout_type)}</DialogDescription>
           {planned.id && !existingCompleted && (
             <div className="pt-2">
-              <Button
-                size="sm"
-                variant="outline"
+              <Button size="sm" variant="outline"
                 className="border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
-                onClick={() => setRescheduleOpen(true)}
-              >
+                onClick={() => setRescheduleOpen(true)}>
                 <CalendarX className="w-4 h-4" />
                 {t("cal.reschedule.button")}
               </Button>
@@ -219,8 +214,7 @@ export function WorkoutDetailDialog({
           <TabsList className="grid grid-cols-3 w-full">
             <TabsTrigger value="plan">{t("cal.tab.plan")}</TabsTrigger>
             <TabsTrigger value="fuel">
-              <Apple className="w-3.5 h-3.5 mr-1" />
-              {t("cal.tab.nutrition")}
+              <Apple className="w-3.5 h-3.5 mr-1" />{t("cal.tab.nutrition")}
             </TabsTrigger>
             <TabsTrigger value="log">{t("cal.tab.log")}</TabsTrigger>
           </TabsList>
@@ -244,6 +238,27 @@ export function WorkoutDetailDialog({
           </TabsContent>
 
           <TabsContent value="log" className="space-y-4 pt-4">
+
+            {/* Banner Strava */}
+            {stravaActivity && (
+              <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-3 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-orange-500 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-orange-500">Atividade do Strava encontrada!</p>
+                    <p className="text-xs text-muted-foreground">
+                      {stravaActivity.distance_km ?? "—"}km · {stravaActivity.duration_min ?? "—"}min · D+{stravaActivity.elevation_m ?? "—"}m
+                    </p>
+                  </div>
+                </div>
+                <Button size="sm" variant="outline"
+                  className="border-orange-500/40 text-orange-500 hover:bg-orange-500/10"
+                  onClick={applyStravaActivity}>
+                  Usar dados do Strava
+                </Button>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <FormField label={t("cal.field.distance")}>
                 <Input type="number" step="0.1" value={form.distance} onChange={(e) => setForm({ ...form, distance: e.target.value })} />
@@ -271,12 +286,8 @@ export function WorkoutDetailDialog({
             </div>
 
             <FormField label={t("cal.field.notes")}>
-              <Textarea
-                rows={3}
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder={t("cal.field.notesPlaceholder")}
-              />
+              <Textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder={t("cal.field.notesPlaceholder")} />
             </FormField>
 
             <div className="flex flex-col sm:flex-row gap-2">
@@ -297,23 +308,12 @@ export function WorkoutDetailDialog({
                   <Brain className="w-4 h-4 text-primary" />
                   <span className="text-sm font-medium">{t("cal.btn.deepLabel")}</span>
                 </div>
-                <Button
-                  size="sm"
-                  variant="summit"
-                  onClick={() => requestFeedback("deep")}
-                  disabled={loadingFeedback !== null}
-                >
+                <Button size="sm" variant="summit" onClick={() => requestFeedback("deep")} disabled={loadingFeedback !== null}>
                   {loadingFeedback === "deep" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
                   {t("cal.btn.deep")}
                 </Button>
               </div>
-              {deep && (
-                <DeepFeedbackCard
-                  deep={deep}
-                  onApply={handleApplyAdaptations}
-                  applying={applying}
-                />
-              )}
+              {deep && <DeepFeedbackCard deep={deep} onApply={handleApplyAdaptations} applying={applying} />}
             </div>
           </TabsContent>
         </Tabs>
@@ -324,10 +324,7 @@ export function WorkoutDetailDialog({
         planned={planned}
         allPlanned={allPlanned ?? upcoming}
         completed={allCompleted ?? []}
-        onDone={() => {
-          onReschedule?.();
-          onOpenChange(false);
-        }}
+        onDone={() => { onReschedule?.(); onOpenChange(false); }}
       />
     </Dialog>
   );
@@ -366,7 +363,6 @@ function NutritionPanel({ planned }: { planned: CalendarPlannedWorkout }) {
         </div>
         <p className="text-xs text-foreground/85 italic">{n.rationale}</p>
       </div>
-
       {n.sections.map((s) => (
         <div key={s.title} className="space-y-1.5">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">{s.title}</div>
@@ -407,17 +403,13 @@ function FeedbackCard({ quick }: { quick: QuickFeedback }) {
       {quick.highlights.length > 0 && (
         <div>
           <div className="text-[10px] uppercase tracking-wide opacity-70 mb-1">{t("coach.highlights")}</div>
-          <ul className="text-xs space-y-1 text-foreground/90">
-            {quick.highlights.map((h, i) => <li key={i}>• {h}</li>)}
-          </ul>
+          <ul className="text-xs space-y-1 text-foreground/90">{quick.highlights.map((h, i) => <li key={i}>• {h}</li>)}</ul>
         </div>
       )}
       {quick.improvements.length > 0 && (
         <div>
           <div className="text-[10px] uppercase tracking-wide opacity-70 mb-1">{t("coach.improvements")}</div>
-          <ul className="text-xs space-y-1 text-foreground/90">
-            {quick.improvements.map((h, i) => <li key={i}>• {h}</li>)}
-          </ul>
+          <ul className="text-xs space-y-1 text-foreground/90">{quick.improvements.map((h, i) => <li key={i}>• {h}</li>)}</ul>
         </div>
       )}
       <div className="text-xs italic text-foreground/80 pt-1 border-t border-current/20">
@@ -427,14 +419,8 @@ function FeedbackCard({ quick }: { quick: QuickFeedback }) {
   );
 }
 
-function DeepFeedbackCard({
-  deep,
-  onApply,
-  applying,
-}: {
-  deep: DeepFeedback;
-  onApply: (a: AdaptationProposal[]) => void;
-  applying: boolean;
+function DeepFeedbackCard({ deep, onApply, applying }: {
+  deep: DeepFeedback; onApply: (a: AdaptationProposal[]) => void; applying: boolean;
 }) {
   const { t, lang } = useLanguage();
   const dateLocale = getDateLocale(lang);
