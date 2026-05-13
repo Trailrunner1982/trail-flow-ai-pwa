@@ -32,7 +32,7 @@ const TYPE_COLORS: Record<string, string> = {
   rest: "bg-muted/20 border-border/40 text-muted-foreground",
   strength: "bg-blue-500/15 border-blue-500/30 text-blue-400",
   cross_training: "bg-blue-500/10 border-blue-500/20 text-blue-300",
-  race: "bg-destructive/20 border-destructive/40 text-destructive",
+  race: "bg-amber-500/20 border-amber-500/40 text-amber-400",
 };
 
 export function CalendarView({ planned, completed, storage, onChanged }: Props) {
