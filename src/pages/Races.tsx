@@ -241,14 +241,31 @@ const secondaryRaces = (otherRaces ?? []).map((r: any) => ({
   priority: r.priority as "B" | "C",
 }));
 
+// Buscar provas B e C como marcos
+const { data: otherRaces } = await supabase
+  .from("races")
+  .select("name, race_date, priority")
+  .eq("user_id", userId)
+  .in("priority", ["B", "C"])
+  .gte("race_date", format(startDate, "yyyy-MM-dd"))
+  .lte("race_date", race.race_date);
+
+const secondaryRaces = (otherRaces ?? []).map((r: any) => ({
+  date: r.race_date,
+  name: r.name,
+  priority: r.priority as "B" | "C",
+}));
+
 const generated = generatePlan({
- startDate,
-  raceDate,
+  startDate,
+  raceDate: parseDateLocal(race.race_date),
   raceDistanceKm: Number(race.distance_km),
   raceElevationM: race.elevation_gain_m,
   terrainProfile: race.terrain_profile,
   baselineKmPerWeek: baselineKm,
   baselineAvgPaceSecPerKm: baselinePace,
+  raceName: race.name,
+  secondaryRaces,
 });
       const rows = generated.map((w) => ({ ...w, user_id: userId, race_id: race.id }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
