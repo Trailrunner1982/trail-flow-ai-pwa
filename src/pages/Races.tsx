@@ -9,30 +9,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Flag, Plus, Pencil, Trash2, Sparkles, MountainSnow, ShieldCheck, Loader2, Apple } from "lucide-react";
+import { Flag, Plus, Pencil, Trash2, Sparkles, MountainSnow, ShieldCheck, Loader2, Apple, Trophy } from "lucide-react";
 import { RaceFuelingDialog } from "@/components/RaceFuelingDialog";
 import { format, differenceInWeeks, parseISO, addWeeks } from "date-fns";
 import { pt, enUS } from "date-fns/locale";
@@ -58,6 +44,10 @@ interface Race {
   target_pace_sec_per_km: number | null;
   notes: string | null;
   race_type: RaceType;
+  itra_points: number | null;
+  is_atrp: boolean | null;
+  result_position: number | null;
+  result_time_min: number | null;
 }
 
 const emptyForm = {
@@ -72,6 +62,10 @@ const emptyForm = {
   target_pace_sec_per_km: "",
   notes: "",
   race_type: "official" as RaceType,
+  itra_points: "",
+  is_atrp: false,
+  result_position: "",
+  result_time_min: "",
 };
 
 const PRIORITY_COLORS: Record<Priority, string> = {
@@ -108,18 +102,13 @@ export default function RacesPage() {
     if (!userId) return;
     setLoading(true);
     const { data, error } = await supabase
-      .from("races")
-      .select("*")
-      .eq("user_id", userId)
-      .order("race_date", { ascending: true });
+      .from("races").select("*").eq("user_id", userId).order("race_date", { ascending: true });
     if (error) toast.error(error.message);
     setRaces((data ?? []) as Race[]);
     setLoading(false);
   }, [userId]);
 
-  useEffect(() => {
-    fetchRaces();
-  }, [fetchRaces]);
+  useEffect(() => { fetchRaces(); }, [fetchRaces]);
 
   const openCreate = () => {
     setEditing(null);
@@ -141,6 +130,10 @@ export default function RacesPage() {
       target_pace_sec_per_km: r.target_pace_sec_per_km ? String(r.target_pace_sec_per_km) : "",
       notes: r.notes ?? "",
       race_type: r.race_type ?? "official",
+      itra_points: r.itra_points ? String(r.itra_points) : "",
+      is_atrp: r.is_atrp ?? false,
+      result_position: r.result_position ? String(r.result_position) : "",
+      result_time_min: r.result_time_min ? String(r.result_time_min) : "",
     });
     setOpen(true);
   };
@@ -163,6 +156,10 @@ export default function RacesPage() {
       target_pace_sec_per_km: form.target_pace_sec_per_km ? Number(form.target_pace_sec_per_km) : null,
       notes: form.notes || null,
       race_type: form.race_type,
+      itra_points: form.itra_points ? Number(form.itra_points) : null,
+      is_atrp: form.is_atrp,
+      result_position: form.result_position ? Number(form.result_position) : null,
+      result_time_min: form.result_time_min ? Number(form.result_time_min) : null,
     };
     const { error } = editing
       ? await supabase.from("races").update(payload).eq("id", editing.id)
@@ -188,31 +185,15 @@ export default function RacesPage() {
     setValidatingId(race.id);
     try {
       const { data: profile } = await supabase
-        .from("profiles")
-        .select("baseline_km_per_week, baseline_avg_pace_sec_per_km")
-        .eq("id", userId)
-        .single();
-
-      // Recent long run from completed_workouts (last 60 days)
+        .from("profiles").select("baseline_km_per_week, baseline_avg_pace_sec_per_km").eq("id", userId).single();
       const sinceDate = new Date(); sinceDate.setDate(sinceDate.getDate() - 60);
       const { data: recent } = await supabase
-        .from("completed_workouts")
-        .select("actual_distance_km")
-        .eq("user_id", userId)
-        .gte("workout_date", format(sinceDate, "yyyy-MM-dd"))
-        .order("actual_distance_km", { ascending: false })
-        .limit(1);
+        .from("completed_workouts").select("actual_distance_km").eq("user_id", userId)
+        .gte("workout_date", format(sinceDate, "yyyy-MM-dd")).order("actual_distance_km", { ascending: false }).limit(1);
       const recent_long_run_km = recent?.[0]?.actual_distance_km ?? null;
-
       const weeks = differenceInWeeks(parseISO(race.race_date), new Date());
       const { data, error } = await supabase.functions.invoke("validate-race-goal", {
-        body: {
-          race,
-          baseline_km_per_week: profile?.baseline_km_per_week,
-          baseline_pace_sec_per_km: profile?.baseline_avg_pace_sec_per_km,
-          weeks_until_race: weeks,
-          recent_long_run_km,
-        },
+        body: { race, baseline_km_per_week: profile?.baseline_km_per_week, baseline_pace_sec_per_km: profile?.baseline_avg_pace_sec_per_km, weeks_until_race: weeks, recent_long_run_km },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
@@ -229,53 +210,24 @@ export default function RacesPage() {
     if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
     setGeneratingId(race.id);
     try {
-      // Buscar baseline do perfil
       const { data: profile } = await supabase
-        .from("profiles")
-        .select("baseline_km_per_week, baseline_avg_pace_sec_per_km")
-        .eq("id", userId)
-        .single();
-
+        .from("profiles").select("baseline_km_per_week, baseline_avg_pace_sec_per_km").eq("id", userId).single();
       const baselineKm = Number(profile?.baseline_km_per_week ?? 30);
       const baselinePace = Number(profile?.baseline_avg_pace_sec_per_km ?? 360);
-
       const startDate = new Date();
       const raceDate = parseISO(race.race_date);
       const weeks = differenceInWeeks(raceDate, startDate);
-      if (weeks < 1) {
-        toast.error("A data da prova já passou ou é demasiado próxima");
-        return;
-      }
-
-      // Limpar plano anterior associado a esta prova (ou sem prova)
-      const { count } = await supabase
-        .from("planned_workouts")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .gte("workout_date", format(startDate, "yyyy-MM-dd"));
-
+      if (weeks < 1) { toast.error("A data da prova já passou ou é demasiado próxima"); return; }
+      const { count } = await supabase.from("planned_workouts")
+        .select("id", { count: "exact", head: true }).eq("user_id", userId).gte("workout_date", format(startDate, "yyyy-MM-dd"));
       if ((count ?? 0) > 0) {
-        if (!confirm(`Já existem ${count} treinos futuros. Substituir pelo novo plano?`)) {
-          setGeneratingId(null);
-          return;
-        }
-        await supabase
-          .from("planned_workouts")
-          .delete()
-          .eq("user_id", userId)
-          .gte("workout_date", format(startDate, "yyyy-MM-dd"));
+        if (!confirm(`Já existem ${count} treinos futuros. Substituir pelo novo plano?`)) { setGeneratingId(null); return; }
+        await supabase.from("planned_workouts").delete().eq("user_id", userId).gte("workout_date", format(startDate, "yyyy-MM-dd"));
       }
-
       const generated = generatePlan({
-        startDate,
-        raceDate,
-        raceDistanceKm: Number(race.distance_km),
-        raceElevationM: race.elevation_gain_m,
-        terrainProfile: race.terrain_profile,
-        baselineKmPerWeek: baselineKm,
-        baselineAvgPaceSecPerKm: baselinePace,
+        startDate, raceDate, raceDistanceKm: Number(race.distance_km), raceElevationM: race.elevation_gain_m,
+        terrainProfile: race.terrain_profile, baselineKmPerWeek: baselineKm, baselineAvgPaceSecPerKm: baselinePace,
       });
-
       const rows = generated.map((w) => ({ ...w, user_id: userId, race_id: race.id }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
       if (error) throw error;
@@ -298,9 +250,7 @@ export default function RacesPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">{t("races.subtitle")}</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="w-4 h-4" /> {t("common.new")}
-        </Button>
+        <Button onClick={openCreate}><Plus className="w-4 h-4" /> {t("common.new")}</Button>
       </div>
 
       {races.length === 0 ? (
@@ -316,6 +266,7 @@ export default function RacesPage() {
             const date = parseISO(r.race_date);
             const weeksAway = differenceInWeeks(date, new Date());
             const isPast = date < new Date();
+            const hasResult = r.result_time_min || r.result_position || r.itra_points;
             return (
               <Card key={r.id} className="p-5">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -326,6 +277,7 @@ export default function RacesPage() {
                       ) : (
                         <Badge className={PRIORITY_COLORS[r.priority]} variant="outline">{t("races.badge.priority", { p: r.priority })}</Badge>
                       )}
+                      {r.is_atrp && <Badge variant="outline" className="text-[10px] bg-orange-500/10 text-orange-500 border-orange-500/30">ATRP</Badge>}
                       <h3 className="font-semibold text-lg truncate">{r.name}</h3>
                     </div>
                     <div className="text-sm text-muted-foreground mt-1">
@@ -344,6 +296,26 @@ export default function RacesPage() {
                       )}
                     </div>
                     {r.notes && <p className="text-sm text-muted-foreground mt-2">{r.notes}</p>}
+
+                    {/* Resultado */}
+                    {hasResult && (
+                      <div className="flex flex-wrap gap-2 mt-3 pt-2 border-t border-border/40">
+                        <Trophy className="w-3.5 h-3.5 text-amber-500 mt-0.5" />
+                        {r.result_time_min && (
+                          <Badge variant="outline" className="text-xs bg-emerald-500/10 text-emerald-500 border-emerald-500/30">
+                            {Math.floor(r.result_time_min / 60)}h{(r.result_time_min % 60).toString().padStart(2, "0")}
+                          </Badge>
+                        )}
+                        {r.result_position && (
+                          <Badge variant="outline" className="text-xs">#{r.result_position}</Badge>
+                        )}
+                        {r.itra_points && (
+                          <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">
+                            ITRA {r.itra_points} pts
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2">
                     {!isPast && (
@@ -393,11 +365,8 @@ export default function RacesPage() {
             </div>
             <div>
               <Label>Nome</Label>
-              <Input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder={form.race_type === "official" ? "Ex: Trail do Marão" : "Ex: Correr 10K em Maio"}
-              />
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder={form.race_type === "official" ? "Ex: Trail do Marão" : "Ex: Correr 10K em Maio"} />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -456,19 +425,56 @@ export default function RacesPage() {
             {form.goal_type === "target_time" && (
               <div>
                 <Label>Tempo alvo (minutos)</Label>
-                <Input type="number" inputMode="numeric" value={form.target_time_minutes} onChange={(e) => setForm({ ...form, target_time_minutes: e.target.value })} placeholder="Ex: 300 = 5h" />
+                <Input type="number" inputMode="numeric" value={form.target_time_minutes}
+                  onChange={(e) => setForm({ ...form, target_time_minutes: e.target.value })} placeholder="Ex: 300 = 5h" />
               </div>
             )}
             {form.goal_type === "target_pace" && (
               <div>
                 <Label>Pace alvo (segundos por km)</Label>
-                <Input type="number" inputMode="numeric" value={form.target_pace_sec_per_km} onChange={(e) => setForm({ ...form, target_pace_sec_per_km: e.target.value })} placeholder="Ex: 330 = 5:30/km" />
+                <Input type="number" inputMode="numeric" value={form.target_pace_sec_per_km}
+                  onChange={(e) => setForm({ ...form, target_pace_sec_per_km: e.target.value })} placeholder="Ex: 330 = 5:30/km" />
               </div>
             )}
             <div>
               <Label>Notas</Label>
               <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} placeholder="Link, perfil, comentários…" />
             </div>
+
+            {/* Resultado e ITRA/ATRP */}
+            {form.race_type === "official" && (
+              <div className="border-t border-border/40 pt-4 space-y-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold flex items-center gap-2">
+                  <Trophy className="w-3.5 h-3.5 text-amber-500" /> Resultado & ITRA
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Tempo (min)</Label>
+                    <Input type="number" inputMode="numeric" placeholder="ex: 185 = 3h05"
+                      value={form.result_time_min}
+                      onChange={(e) => setForm({ ...form, result_time_min: e.target.value })} />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Posição geral</Label>
+                    <Input type="number" inputMode="numeric" placeholder="ex: 42"
+                      value={form.result_position}
+                      onChange={(e) => setForm({ ...form, result_position: e.target.value })} />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Pontos ITRA</Label>
+                    <Input type="number" inputMode="numeric" placeholder="ex: 380"
+                      value={form.itra_points}
+                      onChange={(e) => setForm({ ...form, itra_points: e.target.value })} />
+                  </div>
+                  <div className="flex items-center gap-2 pt-5">
+                    <input type="checkbox" id="is_atrp" checked={form.is_atrp}
+                      onChange={(e) => setForm({ ...form, is_atrp: e.target.checked })}
+                      className="w-4 h-4 accent-orange-500" />
+                    <Label htmlFor="is_atrp" className="cursor-pointer text-sm">Prova ATRP</Label>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>
@@ -481,9 +487,7 @@ export default function RacesPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remover prova?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Os treinos planeados associados não são apagados.
-            </AlertDialogDescription>
+            <AlertDialogDescription>Esta ação não pode ser desfeita. Os treinos planeados associados não são apagados.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
@@ -543,22 +547,15 @@ export default function RacesPage() {
                       <div className="text-xs text-amber-500">
                         Precisas de pelo menos {minWeeks} semanas. Sugestão: <span className="font-mono font-bold">{suggested}</span>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="w-full border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
+                      <Button size="sm" variant="outline" className="w-full border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
                         onClick={async () => {
                           if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
-                          const { error } = await supabase
-                            .from("races")
-                            .update({ race_date: suggested })
-                            .eq("id", viability.race.id);
+                          const { error } = await supabase.from("races").update({ race_date: suggested }).eq("id", viability.race.id);
                           if (error) return toast.error(error.message);
                           toast.success("Prova adiada para data sugerida");
                           setViability(null);
                           fetchRaces();
-                        }}
-                      >
+                        }}>
                         Adiar para {suggested}
                       </Button>
                     </div>
