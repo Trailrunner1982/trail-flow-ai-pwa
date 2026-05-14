@@ -139,9 +139,11 @@ export function generateSeasonPlan(input: SeasonPlanInput): SeasonPlannedWorkout
     if (w.workout_date < todayStr) return;
     if (usedDates.has(w.workout_date) && w.workout_type !== "strength" && w.workout_type !== "strength_light" && w.workout_type !== "rest") return;
     // Para força e descanso, usar chave composta (podem coexistir com... nada, na prática)
-    const key = (w.workout_type === "strength" || w.workout_type === "strength_light")
-      ? `${w.workout_date}-strength`
-      : w.workout_date;
+    // Descanso nunca sobrepõe treino já existente
+if (w.workout_type === "rest" && usedDates.has(w.workout_date)) return;
+const key = (w.workout_type === "strength" || w.workout_type === "strength_light")
+  ? `${w.workout_date}-strength`
+  : w.workout_date;
     if (usedDates.has(key)) return;
     usedDates.add(key);
     allWorkouts.push(w);
@@ -361,7 +363,7 @@ export function generateSeasonPlan(input: SeasonPlanInput): SeasonPlannedWorkout
     if (weeks === 0) return fromDate;
     const planStart = startOfWeek(fromDate, { weekStartsOn: 1 });
     const recovKm = Math.round(baselineKm * 0.40);
-    const endDate = addDays(fromDate, weeks * 7);
+    const endDate = addDays(planStart, weeks * 7);
     const endDateStr = format(endDate, "yyyy-MM-dd");
 
     for (let w = 0; w < weeks; w++) {
