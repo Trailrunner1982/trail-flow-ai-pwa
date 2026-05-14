@@ -14,9 +14,9 @@ import { useLanguage, getDateLocale } from "@/lib/i18n";
 import { workoutTypeLabel, zoneLabel, fmtDuration, fmtPace } from "@/lib/format";
 import {
   Brain, CheckCircle2, Loader2, Sparkles, ThumbsUp, AlertTriangle,
-  Mountain, Clock, Gauge, Timer, Apple, Droplet, Activity,
+  Mountain, Clock, Gauge, Timer, Apple, Droplet, Activity, Wand2,
 } from "lucide-react";
-import { CalendarX } from "lucide-react";
+import { CalendarX, Check } from "lucide-react";
 import { getWorkoutNutrition } from "@/lib/nutrition";
 import { RescheduleDialog } from "./RescheduleDialog";
 import { useAuth } from "@/hooks/useAuth";
@@ -46,6 +46,33 @@ const verdictMeta: Record<Verdict, { label: string; color: string; icon: any }> 
   concern: { label: "Atenção", color: "bg-destructive/15 text-destructive border-destructive/30", icon: AlertTriangle },
 };
 
+// Limiar de divergência para sugerir adaptação (%)
+const DIVERGENCE_THRESHOLD = 20;
+// RPE mínimo para sugerir adaptação
+const RPE_THRESHOLD = 8;
+
+// Calcula a divergência percentual entre valor real e planeado
+function calcDivergence(actual: number | null | undefined, planned: number | null | undefined): number | null {
+  if (!planned || !actual) return null;
+  return Math.round(((actual - planned) / planned) * 100);
+}
+
+// Decide se deve sugerir adaptação com base na divergência e RPE
+function shouldSuggestAdaptation(
+  actualDist: number | null,
+  plannedDist: number | null,
+  actualDur: number | null,
+  plannedDur: number | null,
+  rpe: number,
+): boolean {
+  const distDiv = calcDivergence(actualDist, plannedDist);
+  const durDiv = calcDivergence(actualDur, plannedDur);
+  if (rpe >= RPE_THRESHOLD) return true;
+  if (distDiv !== null && Math.abs(distDiv) >= DIVERGENCE_THRESHOLD) return true;
+  if (durDiv !== null && Math.abs(durDiv) >= DIVERGENCE_THRESHOLD) return true;
+  return false;
+}
+
 export function WorkoutDetailDialog({
   open, onOpenChange, planned, existingCompleted, upcoming, storage,
   onSaved, allPlanned, allCompleted, onReschedule,
@@ -57,8 +84,17 @@ export function WorkoutDetailDialog({
   const [saving, setSaving] = useState(false);
   const [loadingFeedback, setLoadingFeedback] = useState<null | "quick" | "deep">(null);
   const [applying, setApplying] = useState(false);
+  const [applyingPostWorkout, setApplyingPostWorkout] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [stravaActivity, setStravaActivity] = useState<any>(null);
+
+  // Resultado da análise pós-treino (post_workout)
+  const [postWorkoutResult, setPostWorkoutResult] = useState<{
+    summary: string;
+    overall_load: string;
+    needs_adaptation: boolean;
+    adaptations: any[];
+  } | null>(null);
 
   const [form, setForm] = useState({
     distance: "", elevation: "", durationMin: "", paceSec: "", rpe: 5, notes: "",
@@ -71,6 +107,7 @@ export function WorkoutDetailDialog({
     if (!open || !planned) return;
     setQuick(null);
     setDeep(null);
+    setPostWorkoutResult(null);
     setStravaActivity(null);
     setTab(existingCompleted ? "log" : "plan");
     setForm({
@@ -82,7 +119,6 @@ export function WorkoutDetailDialog({
       notes: existingCompleted?.notes ?? "",
     });
 
-    // Verificar se existe atividade do Strava no mesmo dia
     if (user && !existingCompleted) {
       supabase
         .from("free_workouts")
@@ -90,9 +126,7 @@ export function WorkoutDetailDialog({
         .eq("user_id", user.id)
         .eq("workout_date", planned.workout_date)
         .maybeSingle()
-        .then(({ data }) => {
-          if (data) setStravaActivity(data);
-        });
+        .then(({ data }) => { if (data) setStravaActivity(data); });
     }
   }, [open, planned, existingCompleted, user]);
 
@@ -166,9 +200,71 @@ export function WorkoutDetailDialog({
     }
   };
 
+  // Analisa o impacto do treino nos próximos dias
+  const analysePostWorkout = async () => {
+    if (!user) return;
+    setLoadingFeedback("quick");
+    try {
+      const actual = {
+        distance_km: form.distance ? Number(form.distance) : null,
+        elevation_m: form.elevation ? Number(form.elevation) : null,
+        duration_min: form.durationMin ? Number(form.durationMin) : null,
+        pace_sec_per_km: form.paceSec ? Number(form.paceSec) : null,
+      };
+
+      // Próximos 7 dias de treinos planeados e não completados
+      const nextWorkouts = upcoming
+        .filter(w => w.workout_date > planned.workout_date)
+        .slice(0, 7);
+
+      const { data, error } = await supabase.functions.invoke("adapt-plan", {
+        body: {
+          trigger: "post_workout",
+          planned_workout: planned,
+          actual,
+          rpe: form.rpe,
+          upcoming: nextWorkouts,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const result = data.result;
+      // Só mostrar se há adaptações relevantes
+      if (result.needs_adaptation && result.adaptations?.length > 0) {
+        setPostWorkoutResult(result);
+      } else {
+        // Sem adaptações — mostrar só o summary brevemente
+        toast.success(`✓ Plano OK — ${result.summary}`);
+      }
+    } catch (e: any) {
+      console.warn("post_workout analysis failed:", e);
+      // Não mostrar erro ao utilizador — é uma análise opcional
+    } finally {
+      setLoadingFeedback(null);
+    }
+  };
+
   const handleSaveAndQuickFeedback = async () => {
     const saved = await handleSave();
-    if (saved) await requestFeedback("quick");
+    if (!saved) return;
+
+    // Correr em paralelo: feedback rápido do treino + análise de impacto
+    const actualDist = form.distance ? Number(form.distance) : null;
+    const actualDur = form.durationMin ? Number(form.durationMin) : null;
+    const hasDivergence = shouldSuggestAdaptation(
+      actualDist, planned.target_distance_km,
+      actualDur, planned.target_duration_min,
+      form.rpe,
+    );
+
+    // Feedback quick sempre
+    await requestFeedback("quick");
+
+    // Análise de impacto só se há divergência significativa ou RPE alto
+    if (hasDivergence && upcoming.length > 0) {
+      await analysePostWorkout();
+    }
   };
 
   const handleApplyAdaptations = async (adaptations: AdaptationProposal[]) => {
@@ -182,6 +278,47 @@ export function WorkoutDetailDialog({
       toast.error(e?.message ?? t("cal.toast.applyErr"));
     } finally {
       setApplying(false);
+    }
+  };
+
+  // Aplica adaptações do post_workout (formato diferente do deep feedback)
+  const handleApplyPostWorkout = async () => {
+    if (!postWorkoutResult || !user) return;
+    setApplyingPostWorkout(true);
+    try {
+      const toApply = postWorkoutResult.adaptations.filter((a: any) => a.action !== "keep");
+      for (const a of toApply) {
+        const update: any = {};
+        if (a.new_title) update.title = a.new_title;
+        if (a.new_distance_km != null) update.target_distance_km = a.new_distance_km;
+        if (a.new_elevation_m != null) update.target_elevation_m = a.new_elevation_m;
+        if (a.new_duration_min != null) update.target_duration_min = a.new_duration_min;
+        if (a.new_zone) update.zone = a.new_zone;
+        if (a.action === "rest") {
+          update.is_skipped = true;
+          update.skip_reason = `Adaptação pós-treino: ${a.reasoning}`;
+        }
+        update.description = `↻ Adaptado após treino de ${planned.workout_date}: ${a.reasoning}`;
+        await supabase.from("planned_workouts").update(update).eq("id", a.workout_id);
+      }
+
+      // Registar no ai_feedback
+      await supabase.from("ai_feedback").insert({
+        user_id: user.id,
+        feedback_date: planned.workout_date,
+        feedback_type: "post_workout_adaptation",
+        decision: `Aplicadas ${toApply.length} adaptações pós-treino`,
+        reasoning: postWorkoutResult.summary,
+        context_data: { applied: toApply, planned_workout: planned } as any,
+      });
+
+      toast.success(`${toApply.length} treino${toApply.length !== 1 ? "s" : ""} adaptado${toApply.length !== 1 ? "s" : ""}`);
+      setPostWorkoutResult(null);
+      onReschedule?.(); // refetch no Calendar
+    } catch (e: any) {
+      toast.error(e?.message ?? "Erro a aplicar adaptações");
+    } finally {
+      setApplyingPostWorkout(false);
     }
   };
 
@@ -219,6 +356,7 @@ export function WorkoutDetailDialog({
             <TabsTrigger value="log">{t("cal.tab.log")}</TabsTrigger>
           </TabsList>
 
+          {/* ── Tab Plano ── */}
           <TabsContent value="plan" className="space-y-4 pt-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Stat icon={Gauge} label={t("cal.field.target_distance")} value={planned.target_distance_km ? `${planned.target_distance_km} km` : "—"} />
@@ -227,16 +365,18 @@ export function WorkoutDetailDialog({
               <Stat icon={Timer} label={t("cal.field.target_pace")} value={fmtPace(planned.target_pace_sec_per_km)} />
             </div>
             {planned.description && (
-              <div className="text-sm text-muted-foreground bg-muted/40 rounded-lg p-3 leading-relaxed">
+              <div className="text-sm text-muted-foreground bg-muted/40 rounded-lg p-3 leading-relaxed whitespace-pre-line">
                 {planned.description}
               </div>
             )}
           </TabsContent>
 
+          {/* ── Tab Nutrição ── */}
           <TabsContent value="fuel" className="space-y-4 pt-4">
             <NutritionPanel planned={planned} />
           </TabsContent>
 
+          {/* ── Tab Log ── */}
           <TabsContent value="log" className="space-y-4 pt-4">
 
             {/* Banner Strava */}
@@ -261,16 +401,20 @@ export function WorkoutDetailDialog({
 
             <div className="grid grid-cols-2 gap-3">
               <FormField label={t("cal.field.distance")}>
-                <Input type="number" step="0.1" value={form.distance} onChange={(e) => setForm({ ...form, distance: e.target.value })} />
+                <Input type="number" step="0.1" value={form.distance}
+                  onChange={(e) => setForm({ ...form, distance: e.target.value })} />
               </FormField>
               <FormField label={t("cal.field.elevation")}>
-                <Input type="number" value={form.elevation} onChange={(e) => setForm({ ...form, elevation: e.target.value })} />
+                <Input type="number" value={form.elevation}
+                  onChange={(e) => setForm({ ...form, elevation: e.target.value })} />
               </FormField>
               <FormField label={t("cal.field.duration")}>
-                <Input type="number" value={form.durationMin} onChange={(e) => setForm({ ...form, durationMin: e.target.value })} />
+                <Input type="number" value={form.durationMin}
+                  onChange={(e) => setForm({ ...form, durationMin: e.target.value })} />
               </FormField>
               <FormField label={t("cal.field.pace")}>
-                <Input type="number" value={form.paceSec} onChange={(e) => setForm({ ...form, paceSec: e.target.value })} placeholder="ex: 330" />
+                <Input type="number" value={form.paceSec}
+                  onChange={(e) => setForm({ ...form, paceSec: e.target.value })} placeholder="ex: 330" />
               </FormField>
             </div>
 
@@ -279,14 +423,16 @@ export function WorkoutDetailDialog({
                 <Label className="text-xs">{t("cal.field.rpe")}</Label>
                 <Badge variant="secondary">{form.rpe} / 10</Badge>
               </div>
-              <Slider value={[form.rpe]} min={1} max={10} step={1} onValueChange={(v) => setForm({ ...form, rpe: v[0] })} />
+              <Slider value={[form.rpe]} min={1} max={10} step={1}
+                onValueChange={(v) => setForm({ ...form, rpe: v[0] })} />
               <div className="flex justify-between text-[10px] text-muted-foreground">
                 <span>{t("cal.rpe.light")}</span><span>{t("cal.rpe.mod")}</span><span>{t("cal.rpe.max")}</span>
               </div>
             </div>
 
             <FormField label={t("cal.field.notes")}>
-              <Textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              <Textarea rows={3} value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 placeholder={t("cal.field.notesPlaceholder")} />
             </FormField>
 
@@ -300,8 +446,20 @@ export function WorkoutDetailDialog({
               </Button>
             </div>
 
+            {/* Feedback rápido do treino */}
             {quick && <FeedbackCard quick={quick} />}
 
+            {/* Análise de impacto pós-treino */}
+            {postWorkoutResult && (
+              <PostWorkoutCard
+                result={postWorkoutResult}
+                onApply={handleApplyPostWorkout}
+                onDismiss={() => setPostWorkoutResult(null)}
+                applying={applyingPostWorkout}
+              />
+            )}
+
+            {/* Análise profunda */}
             <div className="border-t border-border/40 pt-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -318,6 +476,7 @@ export function WorkoutDetailDialog({
           </TabsContent>
         </Tabs>
       </DialogContent>
+
       <RescheduleDialog
         open={rescheduleOpen}
         onOpenChange={setRescheduleOpen}
@@ -329,6 +488,69 @@ export function WorkoutDetailDialog({
     </Dialog>
   );
 }
+
+// ── Componente: análise de impacto pós-treino ─────────────────────────────────
+
+function PostWorkoutCard({ result, onApply, onDismiss, applying }: {
+  result: { summary: string; overall_load: string; needs_adaptation: boolean; adaptations: any[] };
+  onApply: () => void;
+  onDismiss: () => void;
+  applying: boolean;
+}) {
+  const toApply = result.adaptations.filter((a: any) => a.action !== "keep");
+  const loadColor =
+    result.overall_load === "reduce" || result.overall_load === "deload"
+      ? "border-amber-500/30 bg-amber-500/10"
+      : result.overall_load === "increase"
+      ? "border-emerald-500/30 bg-emerald-500/10"
+      : "border-border/60 bg-muted/30";
+
+  return (
+    <div className={`rounded-lg border p-4 space-y-3 ${loadColor}`}>
+      <div className="flex items-center gap-2">
+        <Wand2 className="w-4 h-4 text-primary" />
+        <span className="text-sm font-medium">Impacto nos próximos treinos</span>
+        <Badge variant="outline" className="text-[10px] capitalize ml-auto">{result.overall_load}</Badge>
+      </div>
+      <p className="text-sm text-muted-foreground leading-relaxed">{result.summary}</p>
+
+      {toApply.length > 0 && (
+        <div className="space-y-1.5">
+          {toApply.map((a: any, i: number) => (
+            <div key={i} className="text-xs bg-background/60 border border-border/60 rounded p-2 space-y-0.5">
+              <div className="flex justify-between gap-2">
+                <span className="font-medium text-foreground">{a.workout_date} — {a.new_title ?? a.action}</span>
+                <Badge variant="outline" className="text-[10px]">{a.action}</Badge>
+              </div>
+              <p className="text-muted-foreground">{a.reasoning}</p>
+              {(a.new_distance_km != null || a.new_duration_min != null || a.new_elevation_m != null) && (
+                <div className="flex gap-3 text-foreground/70 pt-0.5">
+                  {a.new_distance_km != null && <span>{a.new_distance_km} km</span>}
+                  {a.new_elevation_m != null && <span>{a.new_elevation_m} D+</span>}
+                  {a.new_duration_min != null && <span>{a.new_duration_min} min</span>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <Button variant="ghost" size="sm" onClick={onDismiss} disabled={applying}>
+          Ignorar
+        </Button>
+        {toApply.length > 0 && (
+          <Button size="sm" onClick={onApply} disabled={applying} className="flex-1">
+            {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            Aplicar {toApply.length} ajuste{toApply.length !== 1 ? "s" : ""}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Sub-componentes (inalterados) ─────────────────────────────────────────────
 
 function Stat({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
   return (
