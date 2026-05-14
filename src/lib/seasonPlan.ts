@@ -335,7 +335,7 @@ const key = (w.workout_type === "strength" || w.workout_type === "strength_light
     if (totalDays < 4) return;
     const totalWeeks = Math.ceil(totalDays / 7);
     const planStart = startOfWeek(fromDate, { weekStartsOn: 1 });
-    const maintenanceKm = Math.round(baselineKm * 0.85);
+    const maintenanceKm = Math.max(Math.round(baselineKm * 0.85), 40);
     const toDateStr = format(toDate, "yyyy-MM-dd");
 
     for (let w = 0; w < totalWeeks; w++) {
