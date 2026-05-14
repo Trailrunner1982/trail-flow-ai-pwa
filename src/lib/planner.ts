@@ -272,8 +272,8 @@ export function generatePlan(input: PlannerInput): PlannedWorkout[] {
       addOnDay(easyDays[0], "vert_session", "Z3", `Sessão de Vert ${vertKm} km / ${Math.round(targetVert * 0.45)}D+`,
         "Foco no D+ da semana. Power-hike nas rampas acima de 12%, corre nas suaves.", vertKm, Math.round(targetVert * 0.45), null, null);
 
-    if (availableStrengthDays[0] !== undefined)
-      addOnDay(availableStrengthDays[0], "strength", null, "Força 30-40 min",
+    if (availableStrengthDays[1] !== undefined)
+      addOnDay(availableStrengthDays[1], "strength", null, "Força 30-40 min",
         "Agachamentos, lunges, single leg, core. Foco em pernas e cadeia posterior.");
 
     if (secondaryInWeek.length > 0) {
