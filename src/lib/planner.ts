@@ -7,6 +7,7 @@ export type WorkoutType =
 
 export type Zone = "Z1" | "Z2" | "Z3" | "Z4" | "Z5";
 export type TerrainProfile = "rolling" | "big_climbs" | "sustained" | "mixed";
+export type GoalType = "finish" | "target_time" | "target_pace" | "target_distance" | "target_elevation";
 
 export interface PlannerInput {
   startDate: Date;
@@ -17,6 +18,9 @@ export interface PlannerInput {
   baselineKmPerWeek: number;
   baselineAvgPaceSecPerKm: number;
   raceName?: string;
+  goalType?: GoalType;
+  targetTimeMinutes?: number | null;
+  targetPaceSecPerKm?: number | null;
   secondaryRaces?: { date: string; name: string; priority: "B" | "C" }[];
   availableRunDays?: number[];
   availableStrengthDays?: number[];
@@ -50,7 +54,44 @@ export function parseDateLocal(dateStr: string): Date {
   return new Date(year, month - 1, day);
 }
 
-function paceForZone(basePaceSecPerKm: number, zone: Zone): number {
+/**
+ * Deriva o pace de corrida alvo a partir do objetivo da prova.
+ * Usado como referência para calcular os paces de treino por zona.
+ *
+ * Para provas de trail, o "pace de corrida" é diferente do pace global
+ * (que inclui subidas em power-hike). Usamos um fator de ~0.75 do D+
+ * para estimar a parcela corrível da prova.
+ */
+export function deriveRacePace(
+  goalType: GoalType,
+  targetTimeMinutes: number | null | undefined,
+  targetPaceSecPerKm: number | null | undefined,
+  distanceKm: number,
+  elevationM: number,
+  baselinePaceSecPerKm: number,
+): number {
+  if (goalType === "target_pace" && targetPaceSecPerKm && targetPaceSecPerKm > 0) {
+    return targetPaceSecPerKm;
+  }
+
+  if (goalType === "target_time" && targetTimeMinutes && targetTimeMinutes > 0 && distanceKm > 0) {
+    // Pace global (inclui subidas em marcha)
+    const globalPaceSec = (targetTimeMinutes * 60) / distanceKm;
+
+    // Estimar equivalente plano: subtrair "tempo extra" do D+
+    // Regra empírica trail: cada 100m D+ ≈ +1km equivalente
+    const equivalentKm = distanceKm + elevationM / 100;
+    const flatEquivalentPace = (targetTimeMinutes * 60) / equivalentKm;
+
+    // Pace de corrida é o flatEquivalentPace — mais representativo do esforço aeróbio
+    return Math.round(Math.min(flatEquivalentPace, globalPaceSec));
+  }
+
+  // "finish", "target_distance", "target_elevation" → usa baseline
+  return baselinePaceSecPerKm;
+}
+
+export function paceForZone(basePaceSecPerKm: number, zone: Zone): number {
   const factors: Record<Zone, number> = {
     Z1: 1.20, Z2: 1.10, Z3: 1.00, Z4: 0.92, Z5: 0.85,
   };
@@ -110,11 +151,21 @@ export function generatePlan(input: PlannerInput): PlannedWorkout[] {
   const {
     startDate, raceDate, raceDistanceKm, raceElevationM,
     terrainProfile, baselineKmPerWeek, baselineAvgPaceSecPerKm,
-    raceName = "Prova", secondaryRaces = [],
+    raceName = "Prova",
+    goalType = "finish",
+    targetTimeMinutes = null,
+    targetPaceSecPerKm = null,
+    secondaryRaces = [],
     availableRunDays = [1, 2, 3, 4, 5, 6],
     availableStrengthDays = [2, 4],
     longRunDay = 6,
   } = input;
+
+  // Pace de referência para os treinos — derivado do objetivo
+  const racePace = deriveRacePace(
+    goalType, targetTimeMinutes, targetPaceSecPerKm,
+    raceDistanceKm, raceElevationM, baselineAvgPaceSecPerKm,
+  );
 
   const planStart = startOfWeek(startDate, { weekStartsOn: 1 });
   const raceDateLocal = raceDate instanceof Date ? raceDate : parseDateLocal(format(raceDate, "yyyy-MM-dd"));
@@ -137,7 +188,6 @@ export function generatePlan(input: PlannerInput): PlannedWorkout[] {
     workouts.push(wo);
   };
 
-  // Organizar dias disponíveis
   const runDaysWithoutLong = availableRunDays.filter(d => d !== longRunDay);
   const qualityDays = runDaysWithoutLong.slice(0, 2);
   const easyDays = runDaysWithoutLong.slice(2);
@@ -177,18 +227,18 @@ export function generatePlan(input: PlannerInput): PlannedWorkout[] {
       });
     };
 
-    // Semana da prova
     if (weeksToRace === 0) {
       restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação activa opcional."));
       if (qualityDays[0] !== undefined)
-        addOnDay(qualityDays[0], "easy_z2", "Z2", "Soltar pernas 20 min", "Trote muito leve. Sem stress.", 4, 0, 20, baselineAvgPaceSecPerKm);
+        addOnDay(qualityDays[0], "easy_z2", "Z2", "Soltar pernas 20 min", "Trote muito leve. Sem stress.", 4, 0, 20, paceForZone(racePace, "Z2"));
       if (easyDays[0] !== undefined)
-        addOnDay(easyDays[0], "easy_z2", "Z2", "Activação 15 min + 3x100m", "Activação suave.", 3, 0, 18, baselineAvgPaceSecPerKm);
+        addOnDay(easyDays[0], "easy_z2", "Z2", "Activação 15 min + 3x100m", "Activação suave.", 3, 0, 18, paceForZone(racePace, "Z2"));
       const raceDateStr = format(raceDateLocal, "yyyy-MM-dd");
       workouts.push({
         workout_date: raceDateStr, workout_type: "race", zone: null,
         target_distance_km: raceDistanceKm, target_elevation_m: raceElevationM,
-        target_duration_min: null, target_pace_sec_per_km: null,
+        target_duration_min: targetTimeMinutes ?? null,
+        target_pace_sec_per_km: goalType === "target_pace" ? targetPaceSecPerKm : null,
         title: `🏁 ${raceName} — ${raceDistanceKm}km / ${raceElevationM}D+`,
         description: "Dia da prova! Executa o teu plano de nutrição. Começa conservador, acelera na segunda metade.",
         week_number: w + 1, phase: PHASES.RACE,
@@ -196,40 +246,36 @@ export function generatePlan(input: PlannerInput): PlannedWorkout[] {
       continue;
     }
 
-    // Verificar provas secundárias
     const weekDaysDates = Array.from({ length: 7 }, (_, i) => format(addDays(weekStart, i), "yyyy-MM-dd"));
     const secondaryInWeek = weekDaysDates.filter(d => secondaryRaceDates.has(d));
 
-    // Descanso nos dias sem actividade
     restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação activa opcional (mobilidade)."));
 
-    // Qualidade
     if (qualityDays[0] !== undefined) {
       if (phase === PHASES.BASE) {
         addOnDay(qualityDays[0], "tempo", "Z3", `Tempo run ${qualityKm} km`,
-          "Aquecimento 15min Z2 + bloco Z3 contínuo + 10min Z2.", qualityKm, 0, null, paceForZone(baselineAvgPaceSecPerKm, "Z3"));
+          `Aquecimento 15min Z2 + bloco Z3 contínuo + 10min Z2. Pace alvo: ${formatPace(paceForZone(racePace, "Z3"))}.`,
+          qualityKm, 0, null, paceForZone(racePace, "Z3"));
       } else {
         addOnDay(qualityDays[0], "intervals", "Z4", `Intervalos ${qualityKm} km`,
-          "Aquecimento 15min Z2 + 6x3min Z4 rec 2min Z1 + 10min Z2.", qualityKm, 0, null, paceForZone(baselineAvgPaceSecPerKm, "Z4"));
+          `Aquecimento 15min Z2 + 6x3min Z4 rec 2min Z1 + 10min Z2. Pace Z4: ${formatPace(paceForZone(racePace, "Z4"))}.`,
+          qualityKm, 0, null, paceForZone(racePace, "Z4"));
       }
     }
 
-    // Fácil Z2
     if (qualityDays[1] !== undefined)
       addOnDay(qualityDays[1], "easy_z2", "Z2", `Easy Z2 ${easyKm} km`,
-        "Conversational. Mantém HR no topo de Z2.", easyKm, Math.round(targetVert * 0.10), null, paceForZone(baselineAvgPaceSecPerKm, "Z2"));
+        `Conversational. Mantém HR no topo de Z2. Pace alvo: ${formatPace(paceForZone(racePace, "Z2"))}.`,
+        easyKm, Math.round(targetVert * 0.10), null, paceForZone(racePace, "Z2"));
 
-    // Vert session
     if (easyDays[0] !== undefined)
       addOnDay(easyDays[0], "vert_session", "Z3", `Sessão de Vert ${vertKm} km / ${Math.round(targetVert * 0.45)}D+`,
         "Foco no D+ da semana. Power-hike nas rampas acima de 12%, corre nas suaves.", vertKm, Math.round(targetVert * 0.45), null, null);
 
-    // Força
     if (availableStrengthDays[0] !== undefined)
       addOnDay(availableStrengthDays[0], "strength", null, "Força 30-40 min",
         "Agachamentos, lunges, single leg, core. Foco em pernas e cadeia posterior.");
 
-    // Long run ou prova secundária
     if (secondaryInWeek.length > 0) {
       const secRaceDate = secondaryInWeek[0];
       const secRace = secondaryRaceMap.get(secRaceDate)!;
@@ -244,28 +290,29 @@ export function generatePlan(input: PlannerInput): PlannedWorkout[] {
     } else if (isRepeatedBoutWeek) {
       addOnDay(longRunDay, "downhill_repeats", "Z3", `Long + Downhill Repeats ${longRunKm} km`,
         "Long run com foco excêntrico: nos últimos 30 min, faz 4-6x descidas íngremes. Cria o Repeated Bout Effect.",
-        longRunKm, Math.round(targetVert * 0.45), null, paceForZone(baselineAvgPaceSecPerKm, "Z2"));
+        longRunKm, Math.round(targetVert * 0.45), null, paceForZone(racePace, "Z2"));
     } else {
       addOnDay(longRunDay, "long_run", "Z2", `Long Run ${longRunKm} km / ${Math.round(targetVert * 0.45)}D+`,
-        describeLongRun(terrainProfile, longRunKm, Math.round(targetVert * 0.45)),
-        longRunKm, Math.round(targetVert * 0.45), null, paceForZone(baselineAvgPaceSecPerKm, "Z2"));
+        describeLongRun(terrainProfile, longRunKm, Math.round(targetVert * 0.45), racePace),
+        longRunKm, Math.round(targetVert * 0.45), null, paceForZone(racePace, "Z2"));
     }
 
-    // Recovery
     if (recoveryKm > 0 && easyDays[1] !== undefined)
       addOnDay(easyDays[1], "recovery", "Z1", `Recovery ${recoveryKm} km`,
-        "Trote muito leve para promover circulação. RPE 2-3.", recoveryKm, 0, null, paceForZone(baselineAvgPaceSecPerKm, "Z1"));
+        `Trote muito leve para promover circulação. RPE 2-3. Pace: ${formatPace(paceForZone(racePace, "Z1"))}.`,
+        recoveryKm, 0, null, paceForZone(racePace, "Z1"));
   }
 
   const raceDateStr = format(raceDateLocal, "yyyy-MM-dd");
   return workouts.filter(wo => wo.workout_date <= raceDateStr);
 }
 
-function describeLongRun(profile: TerrainProfile, km: number, vert: number): string {
-  if (profile === "rolling") return `Trail ondulado ${km} km / ${vert}D+. Mantém ritmo estável. Foco em economia de movimento.`;
-  if (profile === "big_climbs") return `Trail com subidas longas ${km} km / ${vert}D+. Power-hike nas rampas acima de 15%.`;
-  if (profile === "sustained") return `Subida sustentada moderada ${km} km / ${vert}D+. Alterna corrida e marcha.`;
-  return `Long run terreno variado ${km} km / ${vert}D+. Aproxima-te do perfil da tua prova âncora.`;
+function describeLongRun(profile: TerrainProfile, km: number, vert: number, racePace: number): string {
+  const paceZ2 = formatPace(paceForZone(racePace, "Z2"));
+  if (profile === "rolling") return `Trail ondulado ${km} km / ${vert}D+. Mantém ritmo estável a ${paceZ2}. Foco em economia de movimento.`;
+  if (profile === "big_climbs") return `Trail com subidas longas ${km} km / ${vert}D+. Power-hike nas rampas acima de 15%. Pace corrível: ${paceZ2}.`;
+  if (profile === "sustained") return `Subida sustentada moderada ${km} km / ${vert}D+. Alterna corrida (${paceZ2}) e marcha.`;
+  return `Long run terreno variado ${km} km / ${vert}D+. Aproxima-te do perfil da prova. Pace Z2: ${paceZ2}.`;
 }
 
 export function formatPace(secPerKm: number | null): string {
