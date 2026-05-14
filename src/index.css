@@ -180,8 +180,29 @@
   [role="tab"][data-state="active"] {
     background-color: hsl(var(--card)) !important;
     color: hsl(var(--foreground)) !important;
+    font-weight: 500 !important;
   }
   [role="tablist"] {
     background-color: hsl(var(--muted)) !important;
   }
+}
+
+/* FORA de @layer — maior especificidade, sobrepõe shadcn */
+.dark [role="tab"] {
+  color: hsl(220 12% 65%) !important;
+}
+.dark [role="tab"][data-state="active"] {
+  color: hsl(40 25% 95%) !important;
+  background-color: hsl(220 25% 11%) !important;
+}
+.dark [role="tablist"] {
+  background-color: hsl(220 20% 16%) !important;
+}
+
+/* Fix headers — CardTitle, DialogTitle, etc */
+.dark .text-foreground,
+.dark [class*="CardTitle"],
+.dark [class*="card-title"],
+.dark h1, .dark h2, .dark h3, .dark h4 {
+  color: hsl(40 25% 95%) !important;
 }
