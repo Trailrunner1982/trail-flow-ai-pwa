@@ -249,7 +249,8 @@ export function generateSeasonPlan(input: SeasonPlanInput): SeasonPlannedWorkout
     const longKm = Math.max(
       Math.round(targetKm * 0.35),
       event.distance_km > 0 ? Math.round(event.distance_km * 0.25) : 0,
-    );
+  10, // mínimo absoluto de 10km para qualquer long run
+);
     const qualKm = Math.round(targetKm * 0.15);
     const easyKm = Math.round(targetKm * 0.18);
     const vertKm = Math.round(targetKm * 0.18);
