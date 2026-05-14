@@ -96,7 +96,8 @@ const GOAL_LABELS: Record<GoalType, string> = {
   target_elevation: "Altimetria alvo (D+)",
 };
 
-// ── Helpers locais de data/dia ────────────────────────────────
+// ─── Helpers de data ──────────────────────────────────────────────────────────
+
 function offsetForDow(weekStart: Date, dow: number): number {
   const s = getDay(weekStart);
   let o = dow - s;
@@ -109,7 +110,24 @@ function dateForDow(weekStart: Date, dow: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// ── Planner de época ──────────────────────────────────────────
+function formatPaceLocal(secPerKm: number | null): string {
+  if (!secPerKm || secPerKm <= 0) return "--";
+  const m = Math.floor(secPerKm / 60);
+  const s = secPerKm % 60;
+  return `${m}:${s.toString().padStart(2, "0")}/km`;
+}
+
+// ─── Planner de época ─────────────────────────────────────────────────────────
+//
+// Princípios:
+// • O atleta tem SEMPRE treinos — com provas, sem provas, ou entre provas
+// • Todos os 7 dias da semana têm sempre algo (treino, força ou descanso)
+// • Blocos de manutenção preenchem gaps entre provas e após a última prova
+// • Dois dias de força sempre nas semanas normais
+// • Recuperação pós-prova: A=2 sem, B=1 sem, C=0
+// • Taper: 2 semanas antes da prova
+// • Ciclos de 3 semanas: 2 build + 1 choque (75%)
+
 type Zone = "Z1" | "Z2" | "Z3" | "Z4" | "Z5";
 
 interface SeasonEvent {
@@ -125,6 +143,33 @@ interface SeasonEvent {
   target_pace_sec_per_km: number | null;
 }
 
+// Quantas semanas de recuperação pós-prova
+function recovWeeksFor(priority: Priority): number {
+  return priority === "A" ? 2 : priority === "B" ? 1 : 0;
+}
+
+// Quantos dias de folga antes de recomeçar o bloco seguinte
+function recovDaysFor(priority: Priority): number {
+  return priority === "A" ? 13 : priority === "B" ? 4 : 1;
+}
+
+// Factor de volume por semana (dentro do bloco de treino, excluindo recovery)
+function volFactorFor(weekIdx: number, weeksToEvent: number): number {
+  if (weeksToEvent === 0) return 0.25;
+  if (weeksToEvent === 1) return 0.45;
+  if (weeksToEvent === 2) return 0.65;
+  if ((weekIdx + 1) % 3 === 0) return 0.75; // choque a cada 3ª semana
+  return 1.0;
+}
+
+function getPhase(weeksToEvent: number, totalWeeks: number): string {
+  if (weeksToEvent === 0) return "Prova";
+  if (weeksToEvent <= 2) return "Taper";
+  if (weeksToEvent <= 4) return "Pico";
+  if (weeksToEvent <= Math.ceil(totalWeeks * 0.45)) return "Específico";
+  return "Base";
+}
+
 function generateSeasonPlan(params: {
   events: SeasonEvent[];
   baselineKm: number;
@@ -136,221 +181,389 @@ function generateSeasonPlan(params: {
   const { events, baselineKm, baselinePace, availableRunDays, availableStrengthDays, longRunDay } = params;
 
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const todayStr = format(today, "yyyy-MM-dd");
 
+  // Ordenar apenas eventos futuros
   const futureEvents = events
     .filter(e => e.date >= todayStr)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  if (futureEvents.length === 0) return [];
+  // Estrutura de dias — calculada uma vez
+  const allDays = [0, 1, 2, 3, 4, 5, 6];
+  const activeDaysSet = new Set([...availableRunDays, ...availableStrengthDays]);
+  const restDays = allDays.filter(d => !activeDaysSet.has(d));
+  const runDaysWithoutLong = availableRunDays.filter(d => d !== longRunDay);
+  const qualityDays = runDaysWithoutLong.slice(0, 2);   // primeiros 2 dias de corrida = qualidade
+  const easyDays = runDaysWithoutLong.slice(2);          // restantes = easy/vert/recovery
+  const strengthDays = availableStrengthDays;            // ambos os dias de força
+
+  // Datas de todas as provas para não sobrepor treinos
+  const allEventDates = new Set(futureEvents.map(e => e.date));
 
   const allWorkouts: PlannedWorkout[] = [];
-  const usedDates = new Set<string>();
+  const usedKeys = new Set<string>();
 
   const addW = (w: PlannedWorkout) => {
+    if (w.workout_date < todayStr) return; // nunca antes de hoje
     const key = `${w.workout_date}-${w.workout_type}`;
-    if (!usedDates.has(key)) { usedDates.add(key); allWorkouts.push(w); }
+    if (usedKeys.has(key)) return;
+    usedKeys.add(key);
+    allWorkouts.push(w);
   };
 
-  const runDaysWithoutLong = availableRunDays.filter(d => d !== longRunDay);
-  const qualityDays = runDaysWithoutLong.slice(0, 2);
-  const easyDays = runDaysWithoutLong.slice(2);
-  const allDays = [0, 1, 2, 3, 4, 5, 6];
-  const activeDays = new Set([...availableRunDays, ...availableStrengthDays]);
-  const restDays = allDays.filter(d => !activeDays.has(d));
+  // ─── Helper: gera uma semana completa ──────────────────────────────────────
+  //
+  // Garante que TODOS os 7 dias têm sempre algo.
+  // on() nunca sobrepõe um dia de prova com outro tipo de treino.
 
-  let blockStart = today;
+  function generateWeek(opts: {
+    weekStart: Date;
+    weekNum: number;
+    phase: string;
+    isRecovery: boolean;
+    isTaper: boolean;
+    isRaceWeek: boolean;
+    isRBEWeek: boolean;
+    targetKm: number;
+    targetVert: number;
+    weekPace: number;
+    event: SeasonEvent;
+    endDateStr: string; // não gerar além desta data
+  }) {
+    const { weekStart, weekNum, phase, isRecovery, isTaper, isRaceWeek, isRBEWeek,
+      targetKm, targetVert, weekPace, event, endDateStr } = opts;
+
+    const on = (
+      dow: number, type: string, zone: Zone | null,
+      title: string, desc: string,
+      km: number | null = null, vert: number | null = null,
+      dur: number | null = null, pace: number | null = null,
+    ) => {
+      const dateStr = dateForDow(weekStart, dow);
+      if (dateStr < todayStr || dateStr > endDateStr) return;
+      if (type !== "race" && allEventDates.has(dateStr)) return; // não sobrepor prova
+      addW({
+        workout_date: dateStr, workout_type: type as any, zone,
+        target_distance_km: km, target_elevation_m: vert,
+        target_duration_min: dur, target_pace_sec_per_km: pace,
+        title, description: desc, week_number: weekNum, phase,
+        race_id: event.id,
+      });
+    };
+
+    // Descanso em TODOS os dias de repouso — sempre, em qualquer fase
+    restDays.forEach(d =>
+      on(d, "rest", null, "Descanso", "Recuperação activa opcional: mobilidade, foam roller, caminhada leve."));
+
+    // ── SEMANA DA PROVA ──────────────────────────────────────────────────────
+    if (isRaceWeek) {
+      qualityDays[0] !== undefined && on(qualityDays[0], "easy_z2", "Z2", "Soltar pernas 20 min",
+        "Trote muito leve. Sem stress muscular. Mantém a rotina, não faças mais.", 4, 0, 20, paceForZone(weekPace, "Z2"));
+      qualityDays[1] !== undefined && on(qualityDays[1], "rest", null, "Descanso", "Repouso activo pré-prova.");
+      easyDays[0] !== undefined && on(easyDays[0], "easy_z2", "Z2", "Activação 15 min + strides",
+        "10 min fácil + 4×20s em ritmo de corrida com recuperação total. Acorda as pernas.", 3, 0, 18, paceForZone(weekPace, "Z2"));
+      easyDays.slice(1).forEach(d => on(d, "rest", null, "Descanso", "Repouso pré-prova."));
+      strengthDays.forEach(d => on(d, "rest", null, "Descanso", "Sem força pré-prova. Repouso completo."));
+      on(longRunDay, "rest", null, "Descanso", "Repouso pré-prova. Prepara o equipamento e a nutrição.");
+      return;
+    }
+
+    // ── SEMANA DE RECUPERAÇÃO ────────────────────────────────────────────────
+    if (isRecovery) {
+      const nRunDays = Math.max(qualityDays.length + easyDays.length + 1, 1);
+      const recovKmPerDay = Math.max(Math.round(targetKm / nRunDays), 4);
+      qualityDays.forEach(d => on(d, "recovery", "Z1", `Recovery ${recovKmPerDay} km`,
+        "Trote muito leve. Se houver dor ou fadiga, substitui por caminhada.", recovKmPerDay, 0, null, paceForZone(baselinePace, "Z1")));
+      easyDays.forEach(d => on(d, "recovery", "Z1", `Recovery ${recovKmPerDay} km`,
+        "Circulação activa. RPE máximo 3/10.", recovKmPerDay, 0, null, paceForZone(baselinePace, "Z1")));
+      on(longRunDay, "easy_z2", "Z2", `Easy longo ${Math.round(targetKm * 0.35)} km`,
+        "Primeiro long run pós-prova — completamente conversacional. Sem pressão de ritmo.",
+        Math.round(targetKm * 0.35), 0, null, paceForZone(baselinePace, "Z2"));
+      // Força só na 2ª semana de recuperação e apenas mobilidade leve
+      if (weekNum > 1) {
+        strengthDays[0] !== undefined && on(strengthDays[0], "strength_light", null, "Mobilidade e força leve 20 min",
+          "Mobilidade articular, alongamentos activos, core leve. Sem carga pesada.");
+        strengthDays.slice(1).forEach(d => on(d, "rest", null, "Descanso", "Sem força em recuperação pós-prova."));
+      } else {
+        strengthDays.forEach(d => on(d, "rest", null, "Descanso", "Sem força na 1ª semana de recuperação."));
+      }
+      return;
+    }
+
+    // ── SEMANA DE TAPER ──────────────────────────────────────────────────────
+    if (isTaper) {
+      const longKm = Math.round(targetKm * 0.30);
+      const easyKm = Math.round(targetKm * 0.20);
+      const qualKm = Math.round(targetKm * 0.15);
+      qualityDays[0] !== undefined && on(qualityDays[0], "tempo", "Z3", `Tempo curto ${qualKm} km`,
+        `Aquecimento 10 min Z2 + ${Math.max(qualKm - 3, 2)} km Z3 + 5 min Z2.\nMantém a velocidade, reduz o volume. Pace Z3: ${formatPaceLocal(paceForZone(weekPace, "Z3"))}.`,
+        qualKm, 0, null, paceForZone(weekPace, "Z3"));
+      qualityDays[1] !== undefined && on(qualityDays[1], "easy_z2", "Z2", `Easy Z2 ${easyKm} km`,
+        `Conversacional. Pace: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`,
+        easyKm, 0, null, paceForZone(weekPace, "Z2"));
+      easyDays[0] !== undefined && on(easyDays[0], "easy_z2", "Z2", `Easy ${easyKm} km`,
+        `Leve. Pace: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`,
+        easyKm, 0, null, paceForZone(weekPace, "Z2"));
+      easyDays.slice(1).forEach(d => on(d, "rest", null, "Descanso", "Repouso no taper."));
+      // Força leve apenas no 1º dia no taper
+      strengthDays[0] !== undefined && on(strengthDays[0], "strength_light", null, "Força leve 20 min",
+        "Activação muscular: lunges, single leg deadlift, core. Sem carga pesada, sem fadiga.");
+      strengthDays.slice(1).forEach(d => on(d, "rest", null, "Descanso", "Repouso no taper."));
+      on(longRunDay, "long_run", "Z2", `Long Run taper ${longKm} km`,
+        `Terreno semelhante ao da prova. Pace Z2: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.\nRelax — confia no trabalho feito.`,
+        longKm, Math.round(targetVert * 0.28), null, paceForZone(weekPace, "Z2"));
+      return;
+    }
+
+    // ── SEMANA NORMAL (Base / Específico / Pico) ─────────────────────────────
+    const longKm = Math.max(Math.round(targetKm * 0.35), Math.round(event.distance_km * 0.25));
+    const qualKm = Math.round(targetKm * 0.15);
+    const easyKm = Math.round(targetKm * 0.18);
+    const vertKm = Math.round(targetKm * 0.18);
+    const usedKm = longKm + qualKm * qualityDays.length + easyKm + vertKm;
+    const recovKm = Math.max(targetKm - usedKm, 0);
+
+    // Qualidade
+    if (qualityDays[0] !== undefined) {
+      if (phase === "Base") {
+        on(qualityDays[0], "tempo", "Z3", `Tempo run ${qualKm} km`,
+          `Aquecimento 15 min Z2 + ${Math.max(qualKm - 5, 2)} km Z3 contínuo + 10 min Z2.\nPace Z3: ${formatPaceLocal(paceForZone(weekPace, "Z3"))}. Deves conseguir falar frases curtas.`,
+          qualKm, 0, null, paceForZone(weekPace, "Z3"));
+      } else {
+        on(qualityDays[0], "intervals", "Z4", `Intervalos ${qualKm} km`,
+          `Aquecimento 15 min Z2 + 6×3 min Z4 (rec 2 min Z1) + 10 min Z2.\nPace Z4: ${formatPaceLocal(paceForZone(weekPace, "Z4"))}.`,
+          qualKm, 0, null, paceForZone(weekPace, "Z4"));
+      }
+    }
+    qualityDays[1] !== undefined && on(qualityDays[1], "easy_z2", "Z2", `Easy Z2 ${easyKm} km`,
+      `Completamente conversacional. Pace: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.\nSe ultrapassares o pace Z2, abranda.`,
+      easyKm, Math.round(targetVert * 0.08), null, paceForZone(weekPace, "Z2"));
+
+    // Easy days: vert no primeiro, recovery no segundo (se existir)
+    easyDays[0] !== undefined && on(easyDays[0], "vert_session", "Z3",
+      `Sessão de Vert ${vertKm} km / ${Math.round(targetVert * 0.45)}D+`,
+      "Power-hike em rampas >12%, corre nas suaves. Foco em acumular D+ sem destruir as pernas.",
+      vertKm, Math.round(targetVert * 0.45), null, null);
+
+    if (easyDays[1] !== undefined) {
+      if (recovKm > 2) {
+        on(easyDays[1], "recovery", "Z1", `Recovery ${recovKm} km`,
+          `Trote muito leve. RPE 2-3/10. Pace: ${formatPaceLocal(paceForZone(weekPace, "Z1"))}.`,
+          recovKm, 0, null, paceForZone(weekPace, "Z1"));
+      } else {
+        on(easyDays[1], "rest", null, "Descanso", "Recuperação activa opcional.");
+      }
+    }
+
+    // Força — AMBOS os dias sempre nas semanas normais
+    strengthDays[0] !== undefined && on(strengthDays[0], "strength", null, "Força — Pernas 35-45 min",
+      "Agachamentos, lunges búlgaros, step-ups, single leg deadlift.\n3×10-12 rep. Cadeia posterior e estabilidade unilateral.");
+    strengthDays[1] !== undefined && on(strengthDays[1], "strength", null, "Força — Core & Tronco 30 min",
+      "Prancha, bird-dog, dead bug, hip thrust, rotações com elástico.\nCore forte = economia de corrida e proteção em descidas.");
+
+    // Long run
+    if (isRBEWeek) {
+      on(longRunDay, "downhill_repeats", "Z3",
+        `Long Run + Downhill Repeats ${longKm} km / ${Math.round(targetVert * 0.40)}D+`,
+        `Long run normal + nos últimos 30 min: 4-6× descidas íngremes a ritmo controlado.\nRepeated Bout Effect — protege as coxas para a prova. Pace Z2: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`,
+        longKm, Math.round(targetVert * 0.40), null, paceForZone(weekPace, "Z2"));
+    } else {
+      const terrainDesc =
+        event.terrain_profile === "rolling"
+          ? `Trail ondulado ${longKm} km / ${Math.round(targetVert * 0.42)}D+. Mantém ritmo estável a ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.\nFoco em economia de movimento.`
+          : event.terrain_profile === "big_climbs"
+          ? `Trail com subidas longas ${longKm} km / ${Math.round(targetVert * 0.42)}D+.\nPower-hike em rampas >15%. Pace corrível: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`
+          : event.terrain_profile === "sustained"
+          ? `Subida sustentada ${longKm} km / ${Math.round(targetVert * 0.42)}D+.\nAlterna corrida (${formatPaceLocal(paceForZone(weekPace, "Z2"))}) e marcha rápida conforme o declive.`
+          : `Long run terreno variado ${longKm} km / ${Math.round(targetVert * 0.42)}D+.\nAproxima-te do perfil da prova. Pace Z2: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`;
+      on(longRunDay, "long_run", "Z2",
+        `Long Run ${longKm} km / ${Math.round(targetVert * 0.42)}D+`,
+        terrainDesc, longKm, Math.round(targetVert * 0.42), null, paceForZone(weekPace, "Z2"));
+    }
+  }
+
+  // ─── Bloco de manutenção (sem prova à vista) ───────────────────────────────
+  //
+  // Usado para:
+  //   • Período antes da 1ª prova se for muito curto para preparação real
+  //   • Gap entre provas
+  //   • Após a última prova (até fim do ano / 16 semanas)
+  //
+  // Volume estável a ~85% do baseline, qualidade genérica, sem pico, sem taper.
+
+  const MAINTENANCE_EVENT: SeasonEvent = {
+    id: "maintenance",
+    date: "9999-12-31",
+    name: "Manutenção",
+    priority: "C",
+    distance_km: 0,
+    elevation_gain_m: 500,
+    terrain_profile: "mixed",
+    goal_type: "finish",
+    target_time_minutes: null,
+    target_pace_sec_per_km: null,
+  };
+
+  function generateMaintenanceBlock(fromDate: Date, toDate: Date, startWeekNum: number) {
+    const totalDays = differenceInDays(toDate, fromDate);
+    if (totalDays < 4) return;
+    const totalWeeks = Math.ceil(totalDays / 7);
+    const planStart = startOfWeek(fromDate, { weekStartsOn: 1 });
+    const maintenanceKm = Math.round(baselineKm * 0.85);
+    const toDateStr = format(toDate, "yyyy-MM-dd");
+
+    for (let w = 0; w < totalWeeks; w++) {
+      const weekStart = addDays(planStart, w * 7);
+      // Choque a cada 3ª semana também na manutenção
+      const volFactor = (w + 1) % 3 === 0 ? 0.75 : 1.0;
+      const targetKm = Math.round(maintenanceKm * volFactor);
+      const targetVert = Math.round(500 * volFactor);
+      // Alterna entre Base e Específico para manter estímulo
+      const phase = w % 2 === 0 ? "Base" : "Específico";
+
+      generateWeek({
+        weekStart,
+        weekNum: startWeekNum + w,
+        phase,
+        isRecovery: false,
+        isTaper: false,
+        isRaceWeek: false,
+        isRBEWeek: false,
+        targetKm,
+        targetVert,
+        weekPace: baselinePace,
+        event: MAINTENANCE_EVENT,
+        endDateStr: toDateStr,
+      });
+    }
+  }
+
+  // ─── Loop principal ────────────────────────────────────────────────────────
+
+  let blockStart = new Date(today);
+  let globalWeekNum = 1;
+
+  // Se não há provas futuras, gerar 16 semanas de manutenção
+  if (futureEvents.length === 0) {
+    const maintenanceEnd = addDays(today, 16 * 7);
+    generateMaintenanceBlock(today, maintenanceEnd, globalWeekNum);
+    return allWorkouts.sort((a, b) => a.workout_date.localeCompare(b.workout_date));
+  }
 
   for (let ei = 0; ei < futureEvents.length; ei++) {
     const event = futureEvents[ei];
     const eventDate = parseDateLocal(event.date);
 
-    // Pace de treino derivado do objetivo desta prova específica
     const racePace = deriveRacePace(
-      event.goal_type,
-      event.target_time_minutes,
-      event.target_pace_sec_per_km,
-      event.distance_km,
-      event.elevation_gain_m,
-      baselinePace,
+      event.goal_type, event.target_time_minutes, event.target_pace_sec_per_km,
+      event.distance_km, event.elevation_gain_m, baselinePace,
     );
+    const peakKm = Math.max(baselineKm * 1.8, event.distance_km * 1.1);
 
-    const totalDays = differenceInDays(eventDate, blockStart);
-    if (totalDays < 3) {
-      allWorkouts.push({
-        workout_date: event.date,
-        workout_type: "race",
-        zone: null,
-        target_distance_km: event.distance_km,
-        target_elevation_m: event.elevation_gain_m,
-        target_duration_min: event.target_time_minutes ?? null,
-        target_pace_sec_per_km: event.goal_type === "target_pace" ? event.target_pace_sec_per_km : null,
-        title: `🏁 ${event.priority === "A" ? "" : `Prova ${event.priority}: `}${event.name} — ${event.distance_km}km / ${event.elevation_gain_m}D+`,
-        description: event.priority === "A"
-          ? "Dia da prova âncora! Executa o teu plano de nutrição. Começa conservador."
-          : `Prova de prioridade ${event.priority}. Usa como simulação — começa controlado.`,
-        week_number: 0,
-        phase: "Prova",
-        race_id: event.id,
-      });
-      blockStart = addDays(eventDate, 1);
+    // Registar a própria prova no calendário
+    addW({
+      workout_date: event.date,
+      workout_type: "race",
+      zone: null,
+      target_distance_km: event.distance_km,
+      target_elevation_m: event.elevation_gain_m,
+      target_duration_min: event.target_time_minutes ?? null,
+      target_pace_sec_per_km: event.goal_type === "target_pace" ? event.target_pace_sec_per_km : null,
+      title: `🏁 ${event.priority === "A" ? "" : `Prova ${event.priority}: `}${event.name} — ${event.distance_km}km / ${event.elevation_gain_m}D+`,
+      description: event.priority === "A"
+        ? `${event.target_time_minutes ? `Objetivo: ${Math.floor(event.target_time_minutes / 60)}h${(event.target_time_minutes % 60).toString().padStart(2, "0")}. ` : ""}Dia da prova âncora! Executa o plano de nutrição. Começa conservador — os primeiros 40% são para guardar energia.`
+        : event.priority === "B"
+        ? "Prova importante. Usa como simulação de ritmo e nutrição. Começa 5-10% mais lento que o objetivo."
+        : "Prova de treino (C). Experimenta equipamento e nutrição. Sem pressão de resultado.",
+      week_number: 0,
+      phase: "Prova",
+      race_id: event.id,
+    });
+
+    const daysUntilEvent = differenceInDays(eventDate, blockStart);
+
+    // Prova demasiado próxima (< 3 dias) — só registar e avançar
+    if (daysUntilEvent < 3) {
+      blockStart = addDays(eventDate, recovDaysFor(event.priority) + 1);
       continue;
     }
 
-    const totalWeeks = Math.ceil(totalDays / 7);
+    const totalWeeks = Math.ceil(daysUntilEvent / 7);
     const planStart = startOfWeek(blockStart, { weekStartsOn: 1 });
-    const recoveryWeeks = event.priority === "A" ? 2 : event.priority === "B" ? 1 : 0;
+
+    // Semanas de recuperação pós-prova anterior (só se não for o 1º evento)
+    const recovWeeks = ei === 0 ? 0 : recovWeeksFor(event.priority);
 
     for (let w = 0; w < totalWeeks; w++) {
       const weekStart = addDays(planStart, w * 7);
       const weeksToEvent = totalWeeks - w - 1;
+      const isRecovery = w < recovWeeks;
+      const phase = isRecovery ? "Recuperação" : getPhase(weeksToEvent, totalWeeks);
 
-      if (format(addDays(weekStart, 6), "yyyy-MM-dd") < todayStr) continue;
+      const trainingWeekIdx = Math.max(w - recovWeeks, 0);
+      const totalTrainingWeeks = totalWeeks - recovWeeks;
+      const buildWeeks = Math.max(totalTrainingWeeks - 3, 1);
+      const progressRatio = Math.min(trainingWeekIdx / buildWeeks, 1);
 
-      let phase = "Base";
-      if (weeksToEvent <= 1) phase = "Taper";
-      else if (weeksToEvent <= 3) phase = "Pico";
-      else if (weeksToEvent <= Math.ceil(totalWeeks * 0.45)) phase = "Específico";
+      const volFactor = isRecovery
+        ? (w === 0 ? 0.35 : 0.50)
+        : volFactorFor(trainingWeekIdx, weeksToEvent);
 
-      let volFactor = 1.0;
-      if (w < recoveryWeeks) volFactor = 0.5;
-      if (weeksToEvent === 1) volFactor = 0.5;
-      if (weeksToEvent === 0) volFactor = 0.25;
-      if ((w + 1) % 4 === 0 && weeksToEvent > 3) volFactor = 0.75;
+      const targetKm = isRecovery
+        ? Math.round(baselineKm * volFactor)
+        : Math.round((baselineKm + (peakKm - baselineKm) * progressRatio) * volFactor);
 
-      const peakKm = Math.max(baselineKm * 1.8, event.distance_km * 1.1);
-      const progressRatio = Math.min(Math.max(w - recoveryWeeks, 0) / Math.max(totalWeeks - recoveryWeeks - 2, 1), 1);
-      const targetKm = Math.round((baselineKm + (peakKm - baselineKm) * progressRatio) * volFactor);
-      const targetVert = Math.round(event.elevation_gain_m * (0.3 + 0.7 * progressRatio) * volFactor);
+      const targetVert = Math.round(event.elevation_gain_m * (0.30 + 0.70 * progressRatio) * volFactor);
+      const weekPace = isRecovery ? baselinePace : racePace;
 
-      const longRunKm = Math.max(Math.round(targetKm * 0.35), Math.round(event.distance_km * 0.25));
-      const qualityKm = Math.round(targetKm * 0.15);
-      const easyKm = Math.round(targetKm * 0.20);
-      const vertKm = Math.round(targetKm * 0.18);
-      const recovKm = Math.max(targetKm - longRunKm - qualityKm - easyKm - vertKm, 0);
-      const isRBE = weeksToEvent === 3;
-
-      // Nas semanas de recuperação pós-prova anterior usamos baselinePace (esforço leve)
-      // Nas semanas normais usamos racePace (treino orientado ao objetivo)
-      const weekPace = w < recoveryWeeks ? baselinePace : racePace;
-
-      const addOnDay = (
-        dow: number, type: string, zone: Zone | null,
-        title: string, desc: string,
-        km: number | null = null, vert: number | null = null,
-        dur: number | null = null, pace: number | null = null,
-      ) => {
-        const dateStr = dateForDow(weekStart, dow);
-        if (dateStr < todayStr || dateStr > event.date) return;
-        addW({
-          workout_date: dateStr, workout_type: type as any, zone,
-          target_distance_km: km, target_elevation_m: vert,
-          target_duration_min: dur, target_pace_sec_per_km: pace,
-          title, description: desc, week_number: w + 1, phase,
-          race_id: event.id,
-        });
-      };
-
-      // ── Semana da prova ──
-      if (weeksToEvent === 0) {
-        restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação activa opcional."));
-        if (qualityDays[0] !== undefined)
-          addOnDay(qualityDays[0], "easy_z2", "Z2", "Soltar pernas 20 min",
-            "Trote muito leve. Sem stress.", 4, 0, 20, paceForZone(weekPace, "Z2"));
-        if (easyDays[0] !== undefined)
-          addOnDay(easyDays[0], "easy_z2", "Z2", "Activação 15 min",
-            "Activação suave.", 3, 0, 18, paceForZone(weekPace, "Z2"));
-        addW({
-          workout_date: event.date,
-          workout_type: "race",
-          zone: null,
-          target_distance_km: event.distance_km,
-          target_elevation_m: event.elevation_gain_m,
-          target_duration_min: event.target_time_minutes ?? null,
-          target_pace_sec_per_km: event.goal_type === "target_pace" ? event.target_pace_sec_per_km : null,
-          title: `🏁 ${event.priority === "A" ? "" : `Prova ${event.priority}: `}${event.name} — ${event.distance_km}km / ${event.elevation_gain_m}D+`,
-          description: event.priority === "A"
-            ? "Dia da prova âncora! Executa o teu plano de nutrição. Começa conservador, acelera na segunda metade."
-            : `Prova de prioridade ${event.priority}. Usa como simulação — começa controlado.`,
-          week_number: w + 1,
-          phase: "Prova",
-          race_id: event.id,
-        });
-        continue;
-      }
-
-      // ── Semanas de recuperação pós-prova anterior ──
-      if (w < recoveryWeeks) {
-        restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação pós-prova."));
-        availableRunDays.forEach(d =>
-          addOnDay(d, "recovery", "Z1", `Recovery ${Math.round(easyKm * 0.5)} km`,
-            "Trote muito leve. Recuperação activa.",
-            Math.round(easyKm * 0.5), 0, null, paceForZone(baselinePace, "Z1")));
-        continue;
-      }
-
-      // ── Semana normal ──
-      restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação activa opcional (mobilidade)."));
-
-      if (qualityDays[0] !== undefined) {
-        if (phase === "Base") {
-          addOnDay(qualityDays[0], "tempo", "Z3", `Tempo run ${qualityKm} km`,
-            `Aquecimento 15min Z2 + bloco Z3 contínuo + 10min Z2. Pace alvo: ${formatPaceLocal(paceForZone(weekPace, "Z3"))}.`,
-            qualityKm, 0, null, paceForZone(weekPace, "Z3"));
-        } else {
-          addOnDay(qualityDays[0], "intervals", "Z4", `Intervalos ${qualityKm} km`,
-            `Aquecimento 15min Z2 + 6x3min Z4 rec 2min Z1 + 10min Z2. Pace Z4: ${formatPaceLocal(paceForZone(weekPace, "Z4"))}.`,
-            qualityKm, 0, null, paceForZone(weekPace, "Z4"));
-        }
-      }
-
-      if (qualityDays[1] !== undefined)
-        addOnDay(qualityDays[1], "easy_z2", "Z2", `Easy Z2 ${easyKm} km`,
-          `Conversational. Mantém HR no topo de Z2. Pace: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`,
-          easyKm, Math.round(targetVert * 0.10), null, paceForZone(weekPace, "Z2"));
-
-      if (easyDays[0] !== undefined)
-        addOnDay(easyDays[0], "vert_session", "Z3", `Sessão de Vert ${vertKm} km / ${Math.round(targetVert * 0.45)}D+`,
-          "Foco no D+. Power-hike nas rampas acima de 12%.",
-          vertKm, Math.round(targetVert * 0.45), null, null);
-
-      if (availableStrengthDays[0] !== undefined)
-        addOnDay(availableStrengthDays[0], "strength", null, "Força 30-40 min",
-          "Agachamentos, lunges, single leg, core.");
-
-      if (isRBE) {
-        addOnDay(longRunDay, "downhill_repeats", "Z3", `Long + Downhill Repeats ${longRunKm} km`,
-          "Nos últimos 30 min, 4-6x descidas íngremes. Repeated Bout Effect.",
-          longRunKm, Math.round(targetVert * 0.45), null, paceForZone(weekPace, "Z2"));
-      } else {
-        const terrainDesc =
-          event.terrain_profile === "rolling" ? `Trail ondulado — mantém ritmo estável a ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.` :
-          event.terrain_profile === "big_climbs" ? `Subidas longas — power-hike acima de 15%. Pace corrível: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.` :
-          `Terreno variado — aproxima-te do perfil da prova. Pace Z2: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`;
-        addOnDay(longRunDay, "long_run", "Z2", `Long Run ${longRunKm} km / ${Math.round(targetVert * 0.45)}D+`,
-          terrainDesc, longRunKm, Math.round(targetVert * 0.45), null, paceForZone(weekPace, "Z2"));
-      }
-
-      if (recovKm > 0 && easyDays[1] !== undefined)
-        addOnDay(easyDays[1], "recovery", "Z1", `Recovery ${recovKm} km`,
-          `Trote muito leve. RPE 2-3. Pace: ${formatPaceLocal(paceForZone(weekPace, "Z1"))}.`,
-          recovKm, 0, null, paceForZone(weekPace, "Z1"));
+      generateWeek({
+        weekStart,
+        weekNum: globalWeekNum + w,
+        phase,
+        isRecovery,
+        isTaper: !isRecovery && weeksToEvent <= 2,
+        isRaceWeek: weeksToEvent === 0,
+        isRBEWeek: !isRecovery && weeksToEvent === 3,
+        targetKm,
+        targetVert,
+        weekPace,
+        event,
+        endDateStr: event.date,
+      });
     }
 
-    const recovDays = event.priority === "A" ? 14 : event.priority === "B" ? 5 : 2;
-    blockStart = addDays(eventDate, recovDays + 1);
+    globalWeekNum += totalWeeks;
+
+    // Gap entre esta prova e a próxima — preencher com manutenção
+    const nextBlockStart = addDays(eventDate, recovDaysFor(event.priority) + 1);
+    const nextEventDate = ei + 1 < futureEvents.length
+      ? parseDateLocal(futureEvents[ei + 1].date)
+      : null;
+
+    if (nextEventDate) {
+      // Há prova a seguir — gap de manutenção antes de o próximo bloco começar
+      const gapDays = differenceInDays(nextEventDate, nextBlockStart);
+      // Só gera manutenção se o gap for maior que as semanas de recuperação
+      // que o próximo bloco já vai gerar internamente
+      const nextRecovWeeks = recovWeeksFor(futureEvents[ei + 1].priority);
+      const maintenanceEnd = addDays(nextBlockStart, Math.max(gapDays - nextRecovWeeks * 7, 0));
+      if (differenceInDays(maintenanceEnd, nextBlockStart) > 3) {
+        generateMaintenanceBlock(nextBlockStart, maintenanceEnd, globalWeekNum);
+      }
+    } else {
+      // Última prova — gerar 12 semanas de manutenção pós-época
+      const postSeasonEnd = addDays(nextBlockStart, 12 * 7);
+      generateMaintenanceBlock(nextBlockStart, postSeasonEnd, globalWeekNum);
+    }
+
+    blockStart = nextBlockStart;
   }
 
-  return allWorkouts;
+  return allWorkouts.sort((a, b) => a.workout_date.localeCompare(b.workout_date));
 }
 
-function formatPaceLocal(secPerKm: number | null): string {
-  if (!secPerKm) return "--";
-  const m = Math.floor(secPerKm / 60);
-  const s = secPerKm % 60;
-  return `${m}:${s.toString().padStart(2, "0")}/km`;
-}
-// ── Fim do planner ────────────────────────────────────────────
+// ─── Fim do planner ───────────────────────────────────────────────────────────
 
 export default function RacesPage() {
   const { userId, canWrite } = useEffectiveUser();
@@ -471,9 +684,6 @@ export default function RacesPage() {
     if (!userId) return;
     if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
 
-    const futureRaces = races.filter(r => r.race_date >= format(new Date(), "yyyy-MM-dd"));
-    if (futureRaces.length === 0) return toast.error("Não tens provas ou objetivos futuros!");
-
     setGeneratingEpoch(true);
     try {
       const { data: profile } = await supabase
@@ -483,11 +693,13 @@ export default function RacesPage() {
 
       const baselineKm = Number(profile?.baseline_km_per_week ?? 30);
       const baselinePace = Number(profile?.baseline_avg_pace_sec_per_km ?? 360);
-      const availableRunDays = (profile?.available_run_days as number[]) ?? [1, 2, 3, 4, 5, 6];
+      const availableRunDays = (profile?.available_run_days as number[]) ?? [1, 3, 5, 0];
       const availableStrengthDays = (profile?.available_strength_days as number[]) ?? [2, 4];
-      const longRunDay = profile?.long_run_day ?? 6;
+      const longRunDay = profile?.long_run_day ?? 0;
 
       const todayStr = format(new Date(), "yyyy-MM-dd");
+
+      // Verificar treinos futuros existentes
       const { count } = await supabase.from("planned_workouts")
         .select("id", { count: "exact", head: true })
         .eq("user_id", userId).gte("workout_date", todayStr);
@@ -501,7 +713,10 @@ export default function RacesPage() {
           .eq("user_id", userId).gte("workout_date", todayStr);
       }
 
-      // Passa todos os campos do objetivo — agora o planner usa-os para calcular os paces certos
+      // Todas as provas futuras — incluindo as sem data futura
+      // O planner gera manutenção mesmo que não haja provas
+      const futureRaces = races.filter(r => r.race_date >= todayStr);
+
       const events: SeasonEvent[] = futureRaces.map(r => ({
         id: r.id,
         date: r.race_date,
@@ -516,7 +731,7 @@ export default function RacesPage() {
       }));
 
       const generated = generateSeasonPlan({
-        events,
+        events,          // pode ser [] — gera manutenção na mesma
         baselineKm,
         baselinePace,
         availableRunDays,
@@ -525,16 +740,19 @@ export default function RacesPage() {
       });
 
       if (generated.length === 0) {
-        toast.error("Não foi possível gerar treinos. Verifica as datas das provas.");
+        toast.error("Não foi possível gerar treinos.");
         return;
       }
 
+      // Inserir em batches de 500
       const rows = generated.map(w => ({ ...w, user_id: userId }));
-      const { error } = await supabase.from("planned_workouts").insert(rows as any);
-      if (error) throw error;
+      for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await supabase.from("planned_workouts").insert(rows.slice(i, i + 500) as any);
+        if (error) throw error;
+      }
 
-      const lastEvent = futureRaces[futureRaces.length - 1];
-      toast.success(`Plano de época gerado: ${rows.length} treinos até ${format(parseISO(lastEvent.race_date), "d MMM yyyy", { locale: pt })}`);
+      const lastDate = rows[rows.length - 1].workout_date;
+      toast.success(`Plano de época gerado: ${rows.length} treinos até ${format(parseISO(lastDate), "d MMM yyyy", { locale: pt })}`);
     } catch (e: any) {
       toast.error(e?.message ?? "Erro a gerar plano de época");
     } finally {
@@ -548,6 +766,8 @@ export default function RacesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+
+      {/* ── Header ── */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
@@ -556,16 +776,16 @@ export default function RacesPage() {
           <p className="text-sm text-muted-foreground mt-1">{t("races.subtitle")}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {futureRaces.length > 0 && (
-            <Button variant="outline" onClick={handleGenerateEpoch} disabled={generatingEpoch}>
-              {generatingEpoch ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
-              {generatingEpoch ? "A gerar..." : "Gerar plano de época"}
-            </Button>
-          )}
+          {/* Botão sempre visível — gera manutenção mesmo sem provas */}
+          <Button variant="outline" onClick={handleGenerateEpoch} disabled={generatingEpoch}>
+            {generatingEpoch ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
+            {generatingEpoch ? "A gerar..." : "Gerar plano de época"}
+          </Button>
           <Button onClick={openCreate}><Plus className="w-4 h-4" /> {t("common.new")}</Button>
         </div>
       </div>
 
+      {/* ── Lista vazia ── */}
       {races.length === 0 ? (
         <Card className="p-8 text-center space-y-3">
           <MountainSnow className="w-10 h-10 text-primary mx-auto" />
@@ -605,7 +825,9 @@ export default function RacesPage() {
                       {r.elevation_gain_m > 0 && <span><strong>{r.elevation_gain_m}</strong> D+</span>}
                       <span className="text-muted-foreground">{t(`races.goal.${r.goal_type}`)}</span>
                       {r.target_time_minutes && (
-                        <span className="text-muted-foreground">{t("common.time")}: {Math.floor(r.target_time_minutes / 60)}h{(r.target_time_minutes % 60).toString().padStart(2, "0")}</span>
+                        <span className="text-muted-foreground">
+                          {t("common.time")}: {Math.floor(r.target_time_minutes / 60)}h{(r.target_time_minutes % 60).toString().padStart(2, "0")}
+                        </span>
                       )}
                     </div>
                     {r.notes && <p className="text-sm text-muted-foreground mt-2">{r.notes}</p>}
@@ -648,6 +870,7 @@ export default function RacesPage() {
         </div>
       )}
 
+      {/* ── Dialog criar/editar prova ── */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -727,10 +950,10 @@ export default function RacesPage() {
             )}
             {form.goal_type === "target_time" && (
               <div>
-                <Label>Tempo alvo (minutos)</Label>
+                <Label>Tempo alvo (minutos totais)</Label>
                 <Input type="number" inputMode="numeric" value={form.target_time_minutes}
                   onChange={(e) => setForm({ ...form, target_time_minutes: e.target.value })}
-                  placeholder="Ex: 300 = 5h" />
+                  placeholder="Ex: 300 = 5h00" />
               </div>
             )}
             {form.goal_type === "target_pace" && (
@@ -784,6 +1007,7 @@ export default function RacesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Confirmar apagar ── */}
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -797,6 +1021,7 @@ export default function RacesPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── Dialog viabilidade ── */}
       <Dialog open={!!viability} onOpenChange={(o) => !o && setViability(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -870,6 +1095,7 @@ export default function RacesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Nutrição por prova ── */}
       <RaceFuelingDialog
         race={fuelingRace as any}
         open={!!fuelingRace}
