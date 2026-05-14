@@ -181,3 +181,16 @@
     color: hsl(var(--foreground));
   }
 }
+@layer components {
+  /* Fix tabs no tema escuro */
+  [role="tablist"] {
+    background-color: hsl(var(--muted));
+  }
+  [role="tab"] {
+    color: hsl(var(--muted-foreground));
+  }
+  [role="tab"][data-state="active"] {
+    background-color: hsl(var(--card));
+    color: hsl(var(--foreground));
+  }
+}
