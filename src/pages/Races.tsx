@@ -23,11 +23,10 @@ import { RaceFuelingDialog } from "@/components/RaceFuelingDialog";
 import { format, differenceInWeeks, parseISO, addWeeks, addDays, differenceInDays, startOfWeek, getDay } from "date-fns";
 import { pt, enUS } from "date-fns/locale";
 import { toast } from "sonner";
-import { parseDateLocal } from "@/lib/planner";
+import { parseDateLocal, deriveRacePace, paceForZone, type GoalType } from "@/lib/planner";
 import { useLanguage } from "@/lib/i18n";
 
 type Priority = "A" | "B" | "C";
-type GoalType = "finish" | "target_time" | "target_pace" | "target_distance" | "target_elevation";
 type Terrain = "rolling" | "big_climbs" | "sustained" | "mixed";
 type RaceType = "official" | "training_goal";
 
@@ -97,14 +96,7 @@ const GOAL_LABELS: Record<GoalType, string> = {
   target_elevation: "Altimetria alvo (D+)",
 };
 
-// ── Planner de época ──────────────────────────────────────────────
-type Zone = "Z1" | "Z2" | "Z3" | "Z4" | "Z5";
-
-function paceForZone(base: number, zone: Zone): number {
-  const f: Record<Zone, number> = { Z1: 1.20, Z2: 1.10, Z3: 1.00, Z4: 0.92, Z5: 0.85 };
-  return Math.round(base * f[zone]);
-}
-
+// ── Helpers locais de data/dia ────────────────────────────────
 function offsetForDow(weekStart: Date, dow: number): number {
   const s = getDay(weekStart);
   let o = dow - s;
@@ -117,8 +109,24 @@ function dateForDow(weekStart: Date, dow: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// ── Planner de época ──────────────────────────────────────────
+type Zone = "Z1" | "Z2" | "Z3" | "Z4" | "Z5";
+
+interface SeasonEvent {
+  id: string;
+  date: string;
+  name: string;
+  priority: Priority;
+  distance_km: number;
+  elevation_gain_m: number;
+  terrain_profile: string;
+  goal_type: GoalType;
+  target_time_minutes: number | null;
+  target_pace_sec_per_km: number | null;
+}
+
 function generateSeasonPlan(params: {
-  events: { date: string; name: string; priority: Priority; distance_km: number; elevation_gain_m: number; terrain_profile: string; id: string }[];
+  events: SeasonEvent[];
   baselineKm: number;
   baselinePace: number;
   availableRunDays: number[];
@@ -130,7 +138,6 @@ function generateSeasonPlan(params: {
   const today = new Date();
   const todayStr = format(today, "yyyy-MM-dd");
 
-  // Ordenar eventos por data, filtrar apenas futuros
   const futureEvents = events
     .filter(e => e.date >= todayStr)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -145,7 +152,6 @@ function generateSeasonPlan(params: {
     if (!usedDates.has(key)) { usedDates.add(key); allWorkouts.push(w); }
   };
 
-  // Dias disponíveis
   const runDaysWithoutLong = availableRunDays.filter(d => d !== longRunDay);
   const qualityDays = runDaysWithoutLong.slice(0, 2);
   const easyDays = runDaysWithoutLong.slice(2);
@@ -158,19 +164,27 @@ function generateSeasonPlan(params: {
   for (let ei = 0; ei < futureEvents.length; ei++) {
     const event = futureEvents[ei];
     const eventDate = parseDateLocal(event.date);
-    const isLastEvent = ei === futureEvents.length - 1;
+
+    // Pace de treino derivado do objetivo desta prova específica
+    const racePace = deriveRacePace(
+      event.goal_type,
+      event.target_time_minutes,
+      event.target_pace_sec_per_km,
+      event.distance_km,
+      event.elevation_gain_m,
+      baselinePace,
+    );
 
     const totalDays = differenceInDays(eventDate, blockStart);
     if (totalDays < 3) {
-      // Evento muito próximo — apenas marcar
       allWorkouts.push({
         workout_date: event.date,
         workout_type: "race",
         zone: null,
         target_distance_km: event.distance_km,
         target_elevation_m: event.elevation_gain_m,
-        target_duration_min: null,
-        target_pace_sec_per_km: null,
+        target_duration_min: event.target_time_minutes ?? null,
+        target_pace_sec_per_km: event.goal_type === "target_pace" ? event.target_pace_sec_per_km : null,
         title: `🏁 ${event.priority === "A" ? "" : `Prova ${event.priority}: `}${event.name} — ${event.distance_km}km / ${event.elevation_gain_m}D+`,
         description: event.priority === "A"
           ? "Dia da prova âncora! Executa o teu plano de nutrição. Começa conservador."
@@ -185,27 +199,21 @@ function generateSeasonPlan(params: {
 
     const totalWeeks = Math.ceil(totalDays / 7);
     const planStart = startOfWeek(blockStart, { weekStartsOn: 1 });
-
-    // Recuperação após prova anterior (se não é o primeiro evento)
     const recoveryWeeks = event.priority === "A" ? 2 : event.priority === "B" ? 1 : 0;
 
     for (let w = 0; w < totalWeeks; w++) {
       const weekStart = addDays(planStart, w * 7);
       const weeksToEvent = totalWeeks - w - 1;
-      const weekStartStr = format(weekStart, "yyyy-MM-dd");
 
-      // Não gerar treinos antes de hoje
       if (format(addDays(weekStart, 6), "yyyy-MM-dd") < todayStr) continue;
 
-      // Fase da semana
       let phase = "Base";
       if (weeksToEvent <= 1) phase = "Taper";
       else if (weeksToEvent <= 3) phase = "Pico";
       else if (weeksToEvent <= Math.ceil(totalWeeks * 0.45)) phase = "Específico";
 
-      // Volume
       let volFactor = 1.0;
-      if (w < recoveryWeeks) volFactor = 0.5; // recuperação
+      if (w < recoveryWeeks) volFactor = 0.5;
       if (weeksToEvent === 1) volFactor = 0.5;
       if (weeksToEvent === 0) volFactor = 0.25;
       if ((w + 1) % 4 === 0 && weeksToEvent > 3) volFactor = 0.75;
@@ -222,8 +230,16 @@ function generateSeasonPlan(params: {
       const recovKm = Math.max(targetKm - longRunKm - qualityKm - easyKm - vertKm, 0);
       const isRBE = weeksToEvent === 3;
 
-      const addOnDay = (dow: number, type: string, zone: Zone | null, title: string, desc: string,
-        km: number | null = null, vert: number | null = null, dur: number | null = null, pace: number | null = null) => {
+      // Nas semanas de recuperação pós-prova anterior usamos baselinePace (esforço leve)
+      // Nas semanas normais usamos racePace (treino orientado ao objetivo)
+      const weekPace = w < recoveryWeeks ? baselinePace : racePace;
+
+      const addOnDay = (
+        dow: number, type: string, zone: Zone | null,
+        title: string, desc: string,
+        km: number | null = null, vert: number | null = null,
+        dur: number | null = null, pace: number | null = null,
+      ) => {
         const dateStr = dateForDow(weekStart, dow);
         if (dateStr < todayStr || dateStr > event.date) return;
         addW({
@@ -235,23 +251,23 @@ function generateSeasonPlan(params: {
         });
       };
 
-      // Semana da prova
+      // ── Semana da prova ──
       if (weeksToEvent === 0) {
         restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação activa opcional."));
         if (qualityDays[0] !== undefined)
-          addOnDay(qualityDays[0], "easy_z2", "Z2", "Soltar pernas 20 min", "Trote muito leve. Sem stress.", 4, 0, 20, baselinePace);
+          addOnDay(qualityDays[0], "easy_z2", "Z2", "Soltar pernas 20 min",
+            "Trote muito leve. Sem stress.", 4, 0, 20, paceForZone(weekPace, "Z2"));
         if (easyDays[0] !== undefined)
-          addOnDay(easyDays[0], "easy_z2", "Z2", "Activação 15 min", "Activação suave.", 3, 0, 18, baselinePace);
-
-        // Dia da prova
+          addOnDay(easyDays[0], "easy_z2", "Z2", "Activação 15 min",
+            "Activação suave.", 3, 0, 18, paceForZone(weekPace, "Z2"));
         addW({
           workout_date: event.date,
           workout_type: "race",
           zone: null,
           target_distance_km: event.distance_km,
           target_elevation_m: event.elevation_gain_m,
-          target_duration_min: null,
-          target_pace_sec_per_km: null,
+          target_duration_min: event.target_time_minutes ?? null,
+          target_pace_sec_per_km: event.goal_type === "target_pace" ? event.target_pace_sec_per_km : null,
           title: `🏁 ${event.priority === "A" ? "" : `Prova ${event.priority}: `}${event.name} — ${event.distance_km}km / ${event.elevation_gain_m}D+`,
           description: event.priority === "A"
             ? "Dia da prova âncora! Executa o teu plano de nutrição. Começa conservador, acelera na segunda metade."
@@ -263,33 +279,40 @@ function generateSeasonPlan(params: {
         continue;
       }
 
-      // Semanas de recuperação após prova anterior
+      // ── Semanas de recuperação pós-prova anterior ──
       if (w < recoveryWeeks) {
         restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação pós-prova."));
-        availableRunDays.forEach(d => addOnDay(d, "recovery", "Z1", `Recovery ${Math.round(easyKm * 0.5)} km`, "Trote muito leve. Recuperação activa.", Math.round(easyKm * 0.5), 0, null, paceForZone(baselinePace, "Z1")));
+        availableRunDays.forEach(d =>
+          addOnDay(d, "recovery", "Z1", `Recovery ${Math.round(easyKm * 0.5)} km`,
+            "Trote muito leve. Recuperação activa.",
+            Math.round(easyKm * 0.5), 0, null, paceForZone(baselinePace, "Z1")));
         continue;
       }
 
-      // Semana normal
+      // ── Semana normal ──
       restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação activa opcional (mobilidade)."));
 
       if (qualityDays[0] !== undefined) {
         if (phase === "Base") {
           addOnDay(qualityDays[0], "tempo", "Z3", `Tempo run ${qualityKm} km`,
-            "Aquecimento 15min Z2 + bloco Z3 contínuo + 10min Z2.", qualityKm, 0, null, paceForZone(baselinePace, "Z3"));
+            `Aquecimento 15min Z2 + bloco Z3 contínuo + 10min Z2. Pace alvo: ${formatPaceLocal(paceForZone(weekPace, "Z3"))}.`,
+            qualityKm, 0, null, paceForZone(weekPace, "Z3"));
         } else {
           addOnDay(qualityDays[0], "intervals", "Z4", `Intervalos ${qualityKm} km`,
-            "Aquecimento 15min Z2 + 6x3min Z4 rec 2min Z1 + 10min Z2.", qualityKm, 0, null, paceForZone(baselinePace, "Z4"));
+            `Aquecimento 15min Z2 + 6x3min Z4 rec 2min Z1 + 10min Z2. Pace Z4: ${formatPaceLocal(paceForZone(weekPace, "Z4"))}.`,
+            qualityKm, 0, null, paceForZone(weekPace, "Z4"));
         }
       }
 
       if (qualityDays[1] !== undefined)
         addOnDay(qualityDays[1], "easy_z2", "Z2", `Easy Z2 ${easyKm} km`,
-          "Conversational. Mantém HR no topo de Z2.", easyKm, Math.round(targetVert * 0.10), null, paceForZone(baselinePace, "Z2"));
+          `Conversational. Mantém HR no topo de Z2. Pace: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`,
+          easyKm, Math.round(targetVert * 0.10), null, paceForZone(weekPace, "Z2"));
 
       if (easyDays[0] !== undefined)
         addOnDay(easyDays[0], "vert_session", "Z3", `Sessão de Vert ${vertKm} km / ${Math.round(targetVert * 0.45)}D+`,
-          "Foco no D+. Power-hike nas rampas acima de 12%.", vertKm, Math.round(targetVert * 0.45), null, null);
+          "Foco no D+. Power-hike nas rampas acima de 12%.",
+          vertKm, Math.round(targetVert * 0.45), null, null);
 
       if (availableStrengthDays[0] !== undefined)
         addOnDay(availableStrengthDays[0], "strength", null, "Força 30-40 min",
@@ -298,30 +321,36 @@ function generateSeasonPlan(params: {
       if (isRBE) {
         addOnDay(longRunDay, "downhill_repeats", "Z3", `Long + Downhill Repeats ${longRunKm} km`,
           "Nos últimos 30 min, 4-6x descidas íngremes. Repeated Bout Effect.",
-          longRunKm, Math.round(targetVert * 0.45), null, paceForZone(baselinePace, "Z2"));
+          longRunKm, Math.round(targetVert * 0.45), null, paceForZone(weekPace, "Z2"));
       } else {
-        const terrainDesc = event.terrain_profile === "rolling"
-          ? "Terreno ondulado — mantém ritmo estável."
-          : event.terrain_profile === "big_climbs"
-          ? "Subidas longas — power-hike acima de 15%."
-          : "Terreno variado — aproxima-te do perfil da prova.";
+        const terrainDesc =
+          event.terrain_profile === "rolling" ? `Trail ondulado — mantém ritmo estável a ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.` :
+          event.terrain_profile === "big_climbs" ? `Subidas longas — power-hike acima de 15%. Pace corrível: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.` :
+          `Terreno variado — aproxima-te do perfil da prova. Pace Z2: ${formatPaceLocal(paceForZone(weekPace, "Z2"))}.`;
         addOnDay(longRunDay, "long_run", "Z2", `Long Run ${longRunKm} km / ${Math.round(targetVert * 0.45)}D+`,
-          terrainDesc, longRunKm, Math.round(targetVert * 0.45), null, paceForZone(baselinePace, "Z2"));
+          terrainDesc, longRunKm, Math.round(targetVert * 0.45), null, paceForZone(weekPace, "Z2"));
       }
 
       if (recovKm > 0 && easyDays[1] !== undefined)
         addOnDay(easyDays[1], "recovery", "Z1", `Recovery ${recovKm} km`,
-          "Trote muito leve. RPE 2-3.", recovKm, 0, null, paceForZone(baselinePace, "Z1"));
+          `Trote muito leve. RPE 2-3. Pace: ${formatPaceLocal(paceForZone(weekPace, "Z1"))}.`,
+          recovKm, 0, null, paceForZone(weekPace, "Z1"));
     }
 
-    // Próximo bloco começa após recuperação pós-prova
     const recovDays = event.priority === "A" ? 14 : event.priority === "B" ? 5 : 2;
     blockStart = addDays(eventDate, recovDays + 1);
   }
 
   return allWorkouts;
 }
-// ── Fim do planner ────────────────────────────────────────────────
+
+function formatPaceLocal(secPerKm: number | null): string {
+  if (!secPerKm) return "--";
+  const m = Math.floor(secPerKm / 60);
+  const s = secPerKm % 60;
+  return `${m}:${s.toString().padStart(2, "0")}/km`;
+}
+// ── Fim do planner ────────────────────────────────────────────
 
 export default function RacesPage() {
   const { userId, canWrite } = useEffectiveUser();
@@ -420,7 +449,13 @@ export default function RacesPage() {
       const recent_long_run_km = recent?.[0]?.actual_distance_km ?? null;
       const weeks = differenceInWeeks(parseISO(race.race_date), new Date());
       const { data, error } = await supabase.functions.invoke("validate-race-goal", {
-        body: { race, baseline_km_per_week: profile?.baseline_km_per_week, baseline_pace_sec_per_km: profile?.baseline_avg_pace_sec_per_km, weeks_until_race: weeks, recent_long_run_km },
+        body: {
+          race,
+          baseline_km_per_week: profile?.baseline_km_per_week,
+          baseline_pace_sec_per_km: profile?.baseline_avg_pace_sec_per_km,
+          weeks_until_race: weeks,
+          recent_long_run_km,
+        },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
@@ -441,7 +476,6 @@ export default function RacesPage() {
 
     setGeneratingEpoch(true);
     try {
-      // Buscar perfil
       const { data: profile } = await supabase
         .from("profiles")
         .select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days, available_strength_days, long_run_day")
@@ -453,7 +487,6 @@ export default function RacesPage() {
       const availableStrengthDays = (profile?.available_strength_days as number[]) ?? [2, 4];
       const longRunDay = profile?.long_run_day ?? 6;
 
-      // Verificar treinos existentes
       const todayStr = format(new Date(), "yyyy-MM-dd");
       const { count } = await supabase.from("planned_workouts")
         .select("id", { count: "exact", head: true })
@@ -468,8 +501,8 @@ export default function RacesPage() {
           .eq("user_id", userId).gte("workout_date", todayStr);
       }
 
-      // Gerar plano de época
-      const events = futureRaces.map(r => ({
+      // Passa todos os campos do objetivo — agora o planner usa-os para calcular os paces certos
+      const events: SeasonEvent[] = futureRaces.map(r => ({
         id: r.id,
         date: r.race_date,
         name: r.name,
@@ -477,6 +510,9 @@ export default function RacesPage() {
         distance_km: r.distance_km,
         elevation_gain_m: r.elevation_gain_m,
         terrain_profile: r.terrain_profile,
+        goal_type: r.goal_type,
+        target_time_minutes: r.target_time_minutes ?? null,
+        target_pace_sec_per_km: r.target_pace_sec_per_km ?? null,
       }));
 
       const generated = generateSeasonPlan({
@@ -635,7 +671,7 @@ export default function RacesPage() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label>Data (dd/mm/aaaa)</Label>
+                <Label>Data</Label>
                 <Input type="date" value={form.race_date} onChange={(e) => setForm({ ...form, race_date: e.target.value })} />
               </div>
               {form.race_type === "official" && (
@@ -693,14 +729,16 @@ export default function RacesPage() {
               <div>
                 <Label>Tempo alvo (minutos)</Label>
                 <Input type="number" inputMode="numeric" value={form.target_time_minutes}
-                  onChange={(e) => setForm({ ...form, target_time_minutes: e.target.value })} placeholder="Ex: 300 = 5h" />
+                  onChange={(e) => setForm({ ...form, target_time_minutes: e.target.value })}
+                  placeholder="Ex: 300 = 5h" />
               </div>
             )}
             {form.goal_type === "target_pace" && (
               <div>
                 <Label>Pace alvo (segundos por km)</Label>
                 <Input type="number" inputMode="numeric" value={form.target_pace_sec_per_km}
-                  onChange={(e) => setForm({ ...form, target_pace_sec_per_km: e.target.value })} placeholder="Ex: 330 = 5:30/km" />
+                  onChange={(e) => setForm({ ...form, target_pace_sec_per_km: e.target.value })}
+                  placeholder="Ex: 330 = 5:30/km" />
               </div>
             )}
             <div>
