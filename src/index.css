@@ -173,24 +173,15 @@
   .scrollbar-hide::-webkit-scrollbar { display: none; }
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
-@layer base {
-  [data-radix-ui-collection-item] {
-    color: hsl(var(--muted-foreground));
-  }
-  [role="tab"][data-state="active"] {
-    color: hsl(var(--foreground));
-  }
-}
-@layer components {
-  /* Fix tabs no tema escuro */
-  [role="tablist"] {
-    background-color: hsl(var(--muted));
-  }
+@layer utilities {
   [role="tab"] {
-    color: hsl(var(--muted-foreground));
+    color: hsl(var(--muted-foreground)) !important;
   }
   [role="tab"][data-state="active"] {
-    background-color: hsl(var(--card));
-    color: hsl(var(--foreground));
+    background-color: hsl(var(--card)) !important;
+    color: hsl(var(--foreground)) !important;
+  }
+  [role="tablist"] {
+    background-color: hsl(var(--muted)) !important;
   }
 }
