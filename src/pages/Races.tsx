@@ -18,12 +18,12 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Flag, Plus, Pencil, Trash2, Sparkles, MountainSnow, ShieldCheck, Loader2, Apple, Trophy } from "lucide-react";
+import { Flag, Plus, Pencil, Trash2, Sparkles, MountainSnow, ShieldCheck, Loader2, Apple, Trophy, Calendar } from "lucide-react";
 import { RaceFuelingDialog } from "@/components/RaceFuelingDialog";
-import { format, differenceInWeeks, parseISO, addWeeks } from "date-fns";
+import { format, differenceInWeeks, parseISO, addWeeks, addDays, differenceInDays, startOfWeek, getDay } from "date-fns";
 import { pt, enUS } from "date-fns/locale";
 import { toast } from "sonner";
-import { generatePlan, parseDateLocal } from "@/lib/planner";
+import { parseDateLocal } from "@/lib/planner";
 import { useLanguage } from "@/lib/i18n";
 
 type Priority = "A" | "B" | "C";
@@ -48,6 +48,21 @@ interface Race {
   is_atrp: boolean | null;
   result_position: number | null;
   result_time_min: number | null;
+}
+
+interface PlannedWorkout {
+  workout_date: string;
+  workout_type: string;
+  zone: string | null;
+  target_distance_km: number | null;
+  target_elevation_m: number | null;
+  target_duration_min: number | null;
+  target_pace_sec_per_km: number | null;
+  title: string;
+  description: string;
+  week_number: number;
+  phase: string;
+  race_id?: string;
 }
 
 const emptyForm = {
@@ -82,18 +97,244 @@ const GOAL_LABELS: Record<GoalType, string> = {
   target_elevation: "Altimetria alvo (D+)",
 };
 
+// ── Planner de época ──────────────────────────────────────────────
+type Zone = "Z1" | "Z2" | "Z3" | "Z4" | "Z5";
+
+function paceForZone(base: number, zone: Zone): number {
+  const f: Record<Zone, number> = { Z1: 1.20, Z2: 1.10, Z3: 1.00, Z4: 0.92, Z5: 0.85 };
+  return Math.round(base * f[zone]);
+}
+
+function offsetForDow(weekStart: Date, dow: number): number {
+  const s = getDay(weekStart);
+  let o = dow - s;
+  if (o < 0) o += 7;
+  return o;
+}
+
+function dateForDow(weekStart: Date, dow: number): string {
+  const d = addDays(weekStart, offsetForDow(weekStart, dow));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function generateSeasonPlan(params: {
+  events: { date: string; name: string; priority: Priority; distance_km: number; elevation_gain_m: number; terrain_profile: string; id: string }[];
+  baselineKm: number;
+  baselinePace: number;
+  availableRunDays: number[];
+  availableStrengthDays: number[];
+  longRunDay: number;
+}): PlannedWorkout[] {
+  const { events, baselineKm, baselinePace, availableRunDays, availableStrengthDays, longRunDay } = params;
+
+  const today = new Date();
+  const todayStr = format(today, "yyyy-MM-dd");
+
+  // Ordenar eventos por data, filtrar apenas futuros
+  const futureEvents = events
+    .filter(e => e.date >= todayStr)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (futureEvents.length === 0) return [];
+
+  const allWorkouts: PlannedWorkout[] = [];
+  const usedDates = new Set<string>();
+
+  const addW = (w: PlannedWorkout) => {
+    const key = `${w.workout_date}-${w.workout_type}`;
+    if (!usedDates.has(key)) { usedDates.add(key); allWorkouts.push(w); }
+  };
+
+  // Dias disponíveis
+  const runDaysWithoutLong = availableRunDays.filter(d => d !== longRunDay);
+  const qualityDays = runDaysWithoutLong.slice(0, 2);
+  const easyDays = runDaysWithoutLong.slice(2);
+  const allDays = [0, 1, 2, 3, 4, 5, 6];
+  const activeDays = new Set([...availableRunDays, ...availableStrengthDays]);
+  const restDays = allDays.filter(d => !activeDays.has(d));
+
+  let blockStart = today;
+
+  for (let ei = 0; ei < futureEvents.length; ei++) {
+    const event = futureEvents[ei];
+    const eventDate = parseDateLocal(event.date);
+    const isLastEvent = ei === futureEvents.length - 1;
+
+    const totalDays = differenceInDays(eventDate, blockStart);
+    if (totalDays < 3) {
+      // Evento muito próximo — apenas marcar
+      allWorkouts.push({
+        workout_date: event.date,
+        workout_type: "race",
+        zone: null,
+        target_distance_km: event.distance_km,
+        target_elevation_m: event.elevation_gain_m,
+        target_duration_min: null,
+        target_pace_sec_per_km: null,
+        title: `🏁 ${event.priority === "A" ? "" : `Prova ${event.priority}: `}${event.name} — ${event.distance_km}km / ${event.elevation_gain_m}D+`,
+        description: event.priority === "A"
+          ? "Dia da prova âncora! Executa o teu plano de nutrição. Começa conservador."
+          : `Prova de prioridade ${event.priority}. Usa como simulação — começa controlado.`,
+        week_number: 0,
+        phase: "Prova",
+        race_id: event.id,
+      });
+      blockStart = addDays(eventDate, 1);
+      continue;
+    }
+
+    const totalWeeks = Math.ceil(totalDays / 7);
+    const planStart = startOfWeek(blockStart, { weekStartsOn: 1 });
+
+    // Recuperação após prova anterior (se não é o primeiro evento)
+    const recoveryWeeks = event.priority === "A" ? 2 : event.priority === "B" ? 1 : 0;
+
+    for (let w = 0; w < totalWeeks; w++) {
+      const weekStart = addDays(planStart, w * 7);
+      const weeksToEvent = totalWeeks - w - 1;
+      const weekStartStr = format(weekStart, "yyyy-MM-dd");
+
+      // Não gerar treinos antes de hoje
+      if (format(addDays(weekStart, 6), "yyyy-MM-dd") < todayStr) continue;
+
+      // Fase da semana
+      let phase = "Base";
+      if (weeksToEvent <= 1) phase = "Taper";
+      else if (weeksToEvent <= 3) phase = "Pico";
+      else if (weeksToEvent <= Math.ceil(totalWeeks * 0.45)) phase = "Específico";
+
+      // Volume
+      let volFactor = 1.0;
+      if (w < recoveryWeeks) volFactor = 0.5; // recuperação
+      if (weeksToEvent === 1) volFactor = 0.5;
+      if (weeksToEvent === 0) volFactor = 0.25;
+      if ((w + 1) % 4 === 0 && weeksToEvent > 3) volFactor = 0.75;
+
+      const peakKm = Math.max(baselineKm * 1.8, event.distance_km * 1.1);
+      const progressRatio = Math.min(Math.max(w - recoveryWeeks, 0) / Math.max(totalWeeks - recoveryWeeks - 2, 1), 1);
+      const targetKm = Math.round((baselineKm + (peakKm - baselineKm) * progressRatio) * volFactor);
+      const targetVert = Math.round(event.elevation_gain_m * (0.3 + 0.7 * progressRatio) * volFactor);
+
+      const longRunKm = Math.max(Math.round(targetKm * 0.35), Math.round(event.distance_km * 0.25));
+      const qualityKm = Math.round(targetKm * 0.15);
+      const easyKm = Math.round(targetKm * 0.20);
+      const vertKm = Math.round(targetKm * 0.18);
+      const recovKm = Math.max(targetKm - longRunKm - qualityKm - easyKm - vertKm, 0);
+      const isRBE = weeksToEvent === 3;
+
+      const addOnDay = (dow: number, type: string, zone: Zone | null, title: string, desc: string,
+        km: number | null = null, vert: number | null = null, dur: number | null = null, pace: number | null = null) => {
+        const dateStr = dateForDow(weekStart, dow);
+        if (dateStr < todayStr || dateStr > event.date) return;
+        addW({
+          workout_date: dateStr, workout_type: type as any, zone,
+          target_distance_km: km, target_elevation_m: vert,
+          target_duration_min: dur, target_pace_sec_per_km: pace,
+          title, description: desc, week_number: w + 1, phase,
+          race_id: event.id,
+        });
+      };
+
+      // Semana da prova
+      if (weeksToEvent === 0) {
+        restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação activa opcional."));
+        if (qualityDays[0] !== undefined)
+          addOnDay(qualityDays[0], "easy_z2", "Z2", "Soltar pernas 20 min", "Trote muito leve. Sem stress.", 4, 0, 20, baselinePace);
+        if (easyDays[0] !== undefined)
+          addOnDay(easyDays[0], "easy_z2", "Z2", "Activação 15 min", "Activação suave.", 3, 0, 18, baselinePace);
+
+        // Dia da prova
+        addW({
+          workout_date: event.date,
+          workout_type: "race",
+          zone: null,
+          target_distance_km: event.distance_km,
+          target_elevation_m: event.elevation_gain_m,
+          target_duration_min: null,
+          target_pace_sec_per_km: null,
+          title: `🏁 ${event.priority === "A" ? "" : `Prova ${event.priority}: `}${event.name} — ${event.distance_km}km / ${event.elevation_gain_m}D+`,
+          description: event.priority === "A"
+            ? "Dia da prova âncora! Executa o teu plano de nutrição. Começa conservador, acelera na segunda metade."
+            : `Prova de prioridade ${event.priority}. Usa como simulação — começa controlado.`,
+          week_number: w + 1,
+          phase: "Prova",
+          race_id: event.id,
+        });
+        continue;
+      }
+
+      // Semanas de recuperação após prova anterior
+      if (w < recoveryWeeks) {
+        restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação pós-prova."));
+        availableRunDays.forEach(d => addOnDay(d, "recovery", "Z1", `Recovery ${Math.round(easyKm * 0.5)} km`, "Trote muito leve. Recuperação activa.", Math.round(easyKm * 0.5), 0, null, paceForZone(baselinePace, "Z1")));
+        continue;
+      }
+
+      // Semana normal
+      restDays.forEach(d => addOnDay(d, "rest", null, "Descanso", "Recuperação activa opcional (mobilidade)."));
+
+      if (qualityDays[0] !== undefined) {
+        if (phase === "Base") {
+          addOnDay(qualityDays[0], "tempo", "Z3", `Tempo run ${qualityKm} km`,
+            "Aquecimento 15min Z2 + bloco Z3 contínuo + 10min Z2.", qualityKm, 0, null, paceForZone(baselinePace, "Z3"));
+        } else {
+          addOnDay(qualityDays[0], "intervals", "Z4", `Intervalos ${qualityKm} km`,
+            "Aquecimento 15min Z2 + 6x3min Z4 rec 2min Z1 + 10min Z2.", qualityKm, 0, null, paceForZone(baselinePace, "Z4"));
+        }
+      }
+
+      if (qualityDays[1] !== undefined)
+        addOnDay(qualityDays[1], "easy_z2", "Z2", `Easy Z2 ${easyKm} km`,
+          "Conversational. Mantém HR no topo de Z2.", easyKm, Math.round(targetVert * 0.10), null, paceForZone(baselinePace, "Z2"));
+
+      if (easyDays[0] !== undefined)
+        addOnDay(easyDays[0], "vert_session", "Z3", `Sessão de Vert ${vertKm} km / ${Math.round(targetVert * 0.45)}D+`,
+          "Foco no D+. Power-hike nas rampas acima de 12%.", vertKm, Math.round(targetVert * 0.45), null, null);
+
+      if (availableStrengthDays[0] !== undefined)
+        addOnDay(availableStrengthDays[0], "strength", null, "Força 30-40 min",
+          "Agachamentos, lunges, single leg, core.");
+
+      if (isRBE) {
+        addOnDay(longRunDay, "downhill_repeats", "Z3", `Long + Downhill Repeats ${longRunKm} km`,
+          "Nos últimos 30 min, 4-6x descidas íngremes. Repeated Bout Effect.",
+          longRunKm, Math.round(targetVert * 0.45), null, paceForZone(baselinePace, "Z2"));
+      } else {
+        const terrainDesc = event.terrain_profile === "rolling"
+          ? "Terreno ondulado — mantém ritmo estável."
+          : event.terrain_profile === "big_climbs"
+          ? "Subidas longas — power-hike acima de 15%."
+          : "Terreno variado — aproxima-te do perfil da prova.";
+        addOnDay(longRunDay, "long_run", "Z2", `Long Run ${longRunKm} km / ${Math.round(targetVert * 0.45)}D+`,
+          terrainDesc, longRunKm, Math.round(targetVert * 0.45), null, paceForZone(baselinePace, "Z2"));
+      }
+
+      if (recovKm > 0 && easyDays[1] !== undefined)
+        addOnDay(easyDays[1], "recovery", "Z1", `Recovery ${recovKm} km`,
+          "Trote muito leve. RPE 2-3.", recovKm, 0, null, paceForZone(baselinePace, "Z1"));
+    }
+
+    // Próximo bloco começa após recuperação pós-prova
+    const recovDays = event.priority === "A" ? 14 : event.priority === "B" ? 5 : 2;
+    blockStart = addDays(eventDate, recovDays + 1);
+  }
+
+  return allWorkouts;
+}
+// ── Fim do planner ────────────────────────────────────────────────
+
 export default function RacesPage() {
   const { userId, canWrite } = useEffectiveUser();
   const { t, lang } = useLanguage();
   const dateLocale = lang === "en" ? enUS : pt;
   const [races, setRaces] = useState<Race[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generatingEpoch, setGeneratingEpoch] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Race | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [viability, setViability] = useState<{ race: Race; result: any } | null>(null);
   const [fuelingRace, setFuelingRace] = useState<Race | null>(null);
@@ -115,17 +356,12 @@ export default function RacesPage() {
   const openEdit = (r: Race) => {
     setEditing(r);
     setForm({
-      name: r.name,
-      race_date: r.race_date,
-      distance_km: String(r.distance_km),
-      elevation_gain_m: String(r.elevation_gain_m),
-      priority: r.priority,
-      goal_type: r.goal_type,
-      terrain_profile: r.terrain_profile,
+      name: r.name, race_date: r.race_date,
+      distance_km: String(r.distance_km), elevation_gain_m: String(r.elevation_gain_m),
+      priority: r.priority, goal_type: r.goal_type, terrain_profile: r.terrain_profile,
       target_time_minutes: r.target_time_minutes ? String(r.target_time_minutes) : "",
       target_pace_sec_per_km: r.target_pace_sec_per_km ? String(r.target_pace_sec_per_km) : "",
-      notes: r.notes ?? "",
-      race_type: r.race_type ?? "official",
+      notes: r.notes ?? "", race_type: r.race_type ?? "official",
       itra_points: r.itra_points ? String(r.itra_points) : "",
       is_atrp: r.is_atrp ?? false,
       result_position: r.result_position ? String(r.result_position) : "",
@@ -140,18 +376,13 @@ export default function RacesPage() {
     if (!form.name.trim()) return toast.error("Indica o nome da prova");
     setSaving(true);
     const payload = {
-      user_id: userId,
-      name: form.name.trim(),
-      race_date: form.race_date,
-      distance_km: Number(form.distance_km),
-      elevation_gain_m: Number(form.elevation_gain_m),
+      user_id: userId, name: form.name.trim(), race_date: form.race_date,
+      distance_km: Number(form.distance_km), elevation_gain_m: Number(form.elevation_gain_m),
       priority: form.race_type === "training_goal" ? "C" as Priority : form.priority,
-      goal_type: form.goal_type,
-      terrain_profile: form.terrain_profile,
+      goal_type: form.goal_type, terrain_profile: form.terrain_profile,
       target_time_minutes: form.target_time_minutes ? Number(form.target_time_minutes) : null,
       target_pace_sec_per_km: form.target_pace_sec_per_km ? Number(form.target_pace_sec_per_km) : null,
-      notes: form.notes || null,
-      race_type: form.race_type,
+      notes: form.notes || null, race_type: form.race_type,
       itra_points: form.itra_points ? Number(form.itra_points) : null,
       is_atrp: form.is_atrp,
       result_position: form.result_position ? Number(form.result_position) : null,
@@ -201,73 +432,83 @@ export default function RacesPage() {
     }
   };
 
-  const handleGeneratePlan = async (race: Race) => {
+  const handleGenerateEpoch = async () => {
     if (!userId) return;
     if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
-    setGeneratingId(race.id);
-    try {
-const { data: profile } = await supabase
-  .from("profiles")
-  .select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days, available_strength_days, long_run_day")
-  .eq("id", userId).single();
-const baselineKm = Number(profile?.baseline_km_per_week ?? 30);
-const baselinePace = Number(profile?.baseline_avg_pace_sec_per_km ?? 360);
-const availableRunDays = profile?.available_run_days ?? [1,2,3,4,5,6];
-const availableStrengthDays = profile?.available_strength_days ?? [2,4];
-const longRunDay = profile?.long_run_day ?? 6;
-      const startDate = new Date();
-      const raceDate = parseDateLocal(race.race_date);
-      const weeks = differenceInWeeks(raceDate, startDate);
-      if (weeks < 1) { toast.error("A data da prova já passou ou é demasiado próxima"); return; }
 
+    const futureRaces = races.filter(r => r.race_date >= format(new Date(), "yyyy-MM-dd"));
+    if (futureRaces.length === 0) return toast.error("Não tens provas ou objetivos futuros!");
+
+    setGeneratingEpoch(true);
+    try {
+      // Buscar perfil
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days, available_strength_days, long_run_day")
+        .eq("id", userId).single();
+
+      const baselineKm = Number(profile?.baseline_km_per_week ?? 30);
+      const baselinePace = Number(profile?.baseline_avg_pace_sec_per_km ?? 360);
+      const availableRunDays = (profile?.available_run_days as number[]) ?? [1, 2, 3, 4, 5, 6];
+      const availableStrengthDays = (profile?.available_strength_days as number[]) ?? [2, 4];
+      const longRunDay = profile?.long_run_day ?? 6;
+
+      // Verificar treinos existentes
+      const todayStr = format(new Date(), "yyyy-MM-dd");
       const { count } = await supabase.from("planned_workouts")
-        .select("id", { count: "exact", head: true }).eq("user_id", userId)
-        .gte("workout_date", format(startDate, "yyyy-MM-dd"));
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId).gte("workout_date", todayStr);
+
       if ((count ?? 0) > 0) {
-        if (!confirm(`Já existem ${count} treinos futuros. Substituir pelo novo plano?`)) { setGeneratingId(null); return; }
-        await supabase.from("planned_workouts").delete().eq("user_id", userId)
-          .gte("workout_date", format(startDate, "yyyy-MM-dd"));
+        if (!confirm(`Já existem ${count} treinos futuros. Substituir pelo novo plano de época?`)) {
+          setGeneratingEpoch(false);
+          return;
+        }
+        await supabase.from("planned_workouts").delete()
+          .eq("user_id", userId).gte("workout_date", todayStr);
       }
 
-      const { data: otherRaces } = await supabase
-        .from("races").select("name, race_date, priority")
-        .eq("user_id", userId).in("priority", ["B", "C"])
-        .gte("race_date", format(startDate, "yyyy-MM-dd"))
-        .lte("race_date", race.race_date);
-
-      const secondaryRaces = (otherRaces ?? []).map((r: any) => ({
+      // Gerar plano de época
+      const events = futureRaces.map(r => ({
+        id: r.id,
         date: r.race_date,
         name: r.name,
-        priority: r.priority as "B" | "C",
+        priority: r.priority,
+        distance_km: r.distance_km,
+        elevation_gain_m: r.elevation_gain_m,
+        terrain_profile: r.terrain_profile,
       }));
 
-const generated = generatePlan({
-  startDate,
-  raceDate,
-  raceDistanceKm: Number(race.distance_km),
-  raceElevationM: race.elevation_gain_m,
-  terrainProfile: race.terrain_profile,
-  baselineKmPerWeek: baselineKm,
-  baselineAvgPaceSecPerKm: baselinePace,
-  raceName: race.name,
-  secondaryRaces,
-  availableRunDays,
-  availableStrengthDays,
-  longRunDay,
-});
+      const generated = generateSeasonPlan({
+        events,
+        baselineKm,
+        baselinePace,
+        availableRunDays,
+        availableStrengthDays,
+        longRunDay,
+      });
 
-      const rows = generated.map((w) => ({ ...w, user_id: userId, race_id: race.id }));
+      if (generated.length === 0) {
+        toast.error("Não foi possível gerar treinos. Verifica as datas das provas.");
+        return;
+      }
+
+      const rows = generated.map(w => ({ ...w, user_id: userId }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
       if (error) throw error;
-      toast.success(`Plano gerado: ${rows.length} treinos até ${format(raceDate, "d MMM", { locale: pt })}`);
+
+      const lastEvent = futureRaces[futureRaces.length - 1];
+      toast.success(`Plano de época gerado: ${rows.length} treinos até ${format(parseISO(lastEvent.race_date), "d MMM yyyy", { locale: pt })}`);
     } catch (e: any) {
-      toast.error(e?.message ?? "Erro a gerar plano");
+      toast.error(e?.message ?? "Erro a gerar plano de época");
     } finally {
-      setGeneratingId(null);
+      setGeneratingEpoch(false);
     }
   };
 
   if (loading) return <LoadingScreen />;
+
+  const futureRaces = races.filter(r => r.race_date >= format(new Date(), "yyyy-MM-dd"));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -278,7 +519,15 @@ const generated = generatePlan({
           </h1>
           <p className="text-sm text-muted-foreground mt-1">{t("races.subtitle")}</p>
         </div>
-        <Button onClick={openCreate}><Plus className="w-4 h-4" /> {t("common.new")}</Button>
+        <div className="flex gap-2 flex-wrap">
+          {futureRaces.length > 0 && (
+            <Button variant="outline" onClick={handleGenerateEpoch} disabled={generatingEpoch}>
+              {generatingEpoch ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
+              {generatingEpoch ? "A gerar..." : "Gerar plano de época"}
+            </Button>
+          )}
+          <Button onClick={openCreate}><Plus className="w-4 h-4" /> {t("common.new")}</Button>
+        </div>
       </div>
 
       {races.length === 0 ? (
@@ -350,10 +599,6 @@ const generated = generatePlan({
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => setFuelingRace(r)}>
                           <Apple className="w-4 h-4" /> {t("races.action.nutrition")}
-                        </Button>
-                        <Button size="sm" onClick={() => handleGeneratePlan(r)} disabled={generatingId === r.id}>
-                          <Sparkles className="w-4 h-4" />
-                          {generatingId === r.id ? t("races.action.generating") : t("races.action.generatePlan")}
                         </Button>
                       </>
                     )}
@@ -472,20 +717,17 @@ const generated = generatePlan({
                   <div>
                     <Label className="text-xs">Tempo (min)</Label>
                     <Input type="number" inputMode="numeric" placeholder="ex: 185 = 3h05"
-                      value={form.result_time_min}
-                      onChange={(e) => setForm({ ...form, result_time_min: e.target.value })} />
+                      value={form.result_time_min} onChange={(e) => setForm({ ...form, result_time_min: e.target.value })} />
                   </div>
                   <div>
                     <Label className="text-xs">Posição geral</Label>
                     <Input type="number" inputMode="numeric" placeholder="ex: 42"
-                      value={form.result_position}
-                      onChange={(e) => setForm({ ...form, result_position: e.target.value })} />
+                      value={form.result_position} onChange={(e) => setForm({ ...form, result_position: e.target.value })} />
                   </div>
                   <div>
                     <Label className="text-xs">Pontos ITRA</Label>
                     <Input type="number" inputMode="numeric" placeholder="ex: 380"
-                      value={form.itra_points}
-                      onChange={(e) => setForm({ ...form, itra_points: e.target.value })} />
+                      value={form.itra_points} onChange={(e) => setForm({ ...form, itra_points: e.target.value })} />
                   </div>
                   <div className="flex items-center gap-2 pt-5">
                     <input type="checkbox" id="is_atrp" checked={form.is_atrp}
