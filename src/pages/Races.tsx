@@ -206,10 +206,15 @@ export default function RacesPage() {
     if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
     setGeneratingId(race.id);
     try {
-      const { data: profile } = await supabase
-        .from("profiles").select("baseline_km_per_week, baseline_avg_pace_sec_per_km").eq("id", userId).single();
-      const baselineKm = Number(profile?.baseline_km_per_week ?? 30);
-      const baselinePace = Number(profile?.baseline_avg_pace_sec_per_km ?? 360);
+const { data: profile } = await supabase
+  .from("profiles")
+  .select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days, available_strength_days, long_run_day")
+  .eq("id", userId).single();
+const baselineKm = Number(profile?.baseline_km_per_week ?? 30);
+const baselinePace = Number(profile?.baseline_avg_pace_sec_per_km ?? 360);
+const availableRunDays = profile?.available_run_days ?? [1,2,3,4,5,6];
+const availableStrengthDays = profile?.available_strength_days ?? [2,4];
+const longRunDay = profile?.long_run_day ?? 6;
       const startDate = new Date();
       const raceDate = parseDateLocal(race.race_date);
       const weeks = differenceInWeeks(raceDate, startDate);
@@ -236,17 +241,20 @@ export default function RacesPage() {
         priority: r.priority as "B" | "C",
       }));
 
-      const generated = generatePlan({
-        startDate,
-        raceDate,
-        raceDistanceKm: Number(race.distance_km),
-        raceElevationM: race.elevation_gain_m,
-        terrainProfile: race.terrain_profile,
-        baselineKmPerWeek: baselineKm,
-        baselineAvgPaceSecPerKm: baselinePace,
-        raceName: race.name,
-        secondaryRaces,
-      });
+const generated = generatePlan({
+  startDate,
+  raceDate,
+  raceDistanceKm: Number(race.distance_km),
+  raceElevationM: race.elevation_gain_m,
+  terrainProfile: race.terrain_profile,
+  baselineKmPerWeek: baselineKm,
+  baselineAvgPaceSecPerKm: baselinePace,
+  raceName: race.name,
+  secondaryRaces,
+  availableRunDays,
+  availableStrengthDays,
+  longRunDay,
+});
 
       const rows = generated.map((w) => ({ ...w, user_id: userId, race_id: race.id }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
