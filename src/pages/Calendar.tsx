@@ -150,7 +150,11 @@ export default function CalendarPage() {
   baselineAvgPaceSecPerKm: 330,
   raceName: "Demo Trail 42K",
 });
-      const rows = generated.map((w) => ({ ...w, user_id: userId }));
+      const rows = generated.map((w) => ({
+  ...w,
+  user_id: userId,
+  race_id: w.race_id && w.race_id !== "single" ? w.race_id : null,
+}));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
       if (error) throw error;
       toast.success(`Plano gerado: ${rows.length} treinos`);
