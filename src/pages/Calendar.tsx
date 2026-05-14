@@ -13,7 +13,7 @@ import type {
   CalendarPlannedWorkout,
   CalendarStorage,
 } from "@/components/calendar/types";
-import { generatePlan } from "@/lib/planner";
+import { generateSeasonPlan } from "@/lib/seasonPlan";
 import { addDays, format } from "date-fns";
 import { Calendar as CalendarIcon, Sparkles, Dumbbell } from "lucide-react";
 import { toast } from "sonner";
@@ -134,30 +134,57 @@ export default function CalendarPage() {
     },
   }), [userId, canWrite, completed, planned, fetchAll]);
 
+  // Plano demo — usa o mesmo generateSeasonPlan com configuração padrão
   const handleGenerateDemo = async () => {
     if (!userId) return;
     if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
     setGenerating(true);
     try {
-      const startDate = new Date();
-     const generated = generatePlan({
-  startDate,
-  raceDate: addDays(startDate, 84),
-  raceDistanceKm: 42,
-  raceElevationM: 2000,
-  terrainProfile: "mixed",
-  baselineKmPerWeek: 35,
-  baselineAvgPaceSecPerKm: 330,
-  raceName: "Demo Trail 42K",
-});
+      // Buscar perfil para usar dias configurados pelo atleta
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days, available_strength_days, long_run_day")
+        .eq("id", userId).single();
+
+      const baselineKm = Number(profile?.baseline_km_per_week ?? 35);
+      const baselinePace = Number(profile?.baseline_avg_pace_sec_per_km ?? 330);
+      const availableRunDays = (profile?.available_run_days as number[]) ?? [1, 3, 5, 0];
+      const availableStrengthDays = (profile?.available_strength_days as number[]) ?? [2, 4];
+      const longRunDay = profile?.long_run_day ?? 0;
+
+      // Prova demo a 12 semanas
+      const raceDate = addDays(new Date(), 84);
+      const raceDateStr = format(raceDate, "yyyy-MM-dd");
+
+      const generated = generateSeasonPlan({
+        events: [{
+          id: "demo",
+          date: raceDateStr,
+          name: "Demo Trail 42K",
+          priority: "A",
+          distance_km: 42,
+          elevation_gain_m: 2000,
+          terrain_profile: "mixed",
+          goal_type: "finish",
+          target_time_minutes: null,
+          target_pace_sec_per_km: null,
+        }],
+        baselineKm,
+        baselinePace,
+        availableRunDays,
+        availableStrengthDays,
+        longRunDay,
+      });
+
       const rows = generated.map((w) => ({
-  ...w,
-  user_id: userId,
-  race_id: w.race_id && w.race_id !== "single" ? w.race_id : null,
-}));
+        ...w,
+        user_id: userId,
+        race_id: w.race_id ?? null,
+      }));
+
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
       if (error) throw error;
-      toast.success(`Plano gerado: ${rows.length} treinos`);
+      toast.success(`Plano demo gerado: ${rows.length} treinos`);
       fetchAll();
     } catch (e: any) {
       toast.error(e?.message ?? "Erro a gerar plano");
