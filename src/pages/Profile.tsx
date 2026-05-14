@@ -7,14 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { calculateBMI, calculateMetabolicAge, calculateZones } from "@/lib/training";
 import { fmtPace } from "@/lib/format";
-import { User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2, Activity, Mountain } from "lucide-react";
+import { User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2, Activity, Mountain, HeartPulse } from "lucide-react";
 import { toast } from "sonner";
 import { differenceInYears, format, subDays } from "date-fns";
 import { useLanguage } from "@/lib/i18n";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import BiometricsPage from "./Biometrics";
 
 interface Profile {
   full_name: string | null;
@@ -94,6 +96,7 @@ export default function ProfilePage() {
   const [paceInput, setPaceInput] = useState("");
   const [stravaConnected, setStravaConnected] = useState(false);
   const [stravaImporting, setStravaImporting] = useState(false);
+  const [mainTab, setMainTab] = useState("profile");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<Profile>({
     full_name: "", date_of_birth: null, weight_kg: null, height_cm: null,
@@ -133,15 +136,11 @@ export default function ProfilePage() {
       setPaceInput(secToPaceInput(data.baseline_avg_pace_sec_per_km));
       if ((data as any).strava_athlete_id) setStravaConnected(true);
     }
-
     const since = format(subDays(new Date(), 90), "yyyy-MM-dd");
     const { data: wData } = await supabase
-      .from("daily_biometrics")
-      .select("id, measurement_date, weight_kg")
-      .eq("user_id", userId)
-      .gte("measurement_date", since)
-      .not("weight_kg", "is", null)
-      .order("measurement_date", { ascending: true });
+      .from("daily_biometrics").select("id, measurement_date, weight_kg")
+      .eq("user_id", userId).gte("measurement_date", since)
+      .not("weight_kg", "is", null).order("measurement_date", { ascending: true });
     setWeightHistory((wData ?? []).map((r: any) => ({ id: r.id, date: r.measurement_date, weight_kg: r.weight_kg })));
     setLoading(false);
   }, [userId]);
@@ -292,361 +291,376 @@ export default function ProfilePage() {
         <p className="text-sm text-muted-foreground mt-1">{t("profile.subtitle")}</p>
       </div>
 
-      {/* Foto + info */}
-      <Card className="p-5 flex items-center gap-4 flex-wrap">
-        <Avatar className="w-20 h-20 border border-border">
-          {form.avatar_url ? <AvatarImage src={form.avatar_url} alt="avatar" /> : null}
-          <AvatarFallback>{initials}</AvatarFallback>
-        </Avatar>
-        <div className="flex-1 min-w-[180px]">
-          <div className="font-semibold text-lg">{form.full_name || t("profile.noName")}</div>
-          {age && <div className="text-sm text-muted-foreground">{age} anos</div>}
-          {currentWeight && <div className="text-sm text-muted-foreground">{currentWeight} kg · {form.height_cm} cm</div>}
-          {form.itra_performance_index && (
-            <div className="text-xs text-muted-foreground mt-1">
-              ITRA {form.itra_performance_index} pts
-              {form.atrp_number && ` · ATRP ${form.atrp_number}`}
+      <Tabs value={mainTab} onValueChange={setMainTab}>
+        <TabsList>
+          <TabsTrigger value="profile">
+            <User className="w-3.5 h-3.5 mr-1.5" /> Perfil
+          </TabsTrigger>
+          <TabsTrigger value="biometrics">
+            <HeartPulse className="w-3.5 h-3.5 mr-1.5" /> Biometria
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Tab Perfil */}
+        <TabsContent value="profile" className="mt-4 space-y-6">
+
+          {/* Foto + info */}
+          <Card className="p-5 flex items-center gap-4 flex-wrap">
+            <Avatar className="w-20 h-20 border border-border">
+              {form.avatar_url ? <AvatarImage src={form.avatar_url} alt="avatar" /> : null}
+              <AvatarFallback>{initials}</AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-[180px]">
+              <div className="font-semibold text-lg">{form.full_name || t("profile.noName")}</div>
+              {age && <div className="text-sm text-muted-foreground">{age} anos</div>}
+              {currentWeight && <div className="text-sm text-muted-foreground">{currentWeight} kg · {form.height_cm} cm</div>}
+              {form.itra_performance_index && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  ITRA {form.itra_performance_index} pts
+                  {form.atrp_number && ` · ATRP ${form.atrp_number}`}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">{t("profile.photoHint")}</p>
             </div>
+            <div className="flex flex-col gap-2">
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAvatarUpload(f); e.target.value = ""; }} />
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingAvatar || !canWrite}>
+                {uploadingAvatar ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                {form.avatar_url ? t("profile.changePhoto") : t("profile.uploadPhoto")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setEditingProfile(!editingProfile)}>
+                <Settings2 className="w-4 h-4" /> Editar perfil
+              </Button>
+            </div>
+          </Card>
+
+          {/* Métricas calculadas */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <MetricCard label={t("profile.metric.bmi")} value={bmi != null ? bmi.toFixed(1) : "—"} hint={bmi ? bmiLabel(bmi) : t("profile.metric.bmiUnit")}
+              tooltip="IMC = peso / altura². Saudável entre 18.5 e 24.9." />
+            <MetricCard label={t("profile.metric.age")} value={age != null ? `${age}` : "—"} hint={t("profile.metric.ageUnit")} />
+            <MetricCard label={t("profile.metric.metabolicAge")} value={metabolicAge != null ? `${metabolicAge}` : "—"} hint={t("profile.metric.metabolicAgeHint")}
+              tooltip="Idade metabólica estimada com base no VO2max e IMC." />
+            <MetricCard label={t("profile.metric.vo2")} value={form.vo2_max != null ? form.vo2_max.toFixed(1) : "—"} hint={t("profile.metric.vo2Unit")}
+              tooltip="VO2max em ml/kg/min. Acima de 50 é muito bom para atletas de trail." />
+          </div>
+
+          {/* Form de perfil */}
+          {editingProfile && (
+            <Card className="p-5 space-y-5">
+              <h3 className="text-sm font-semibold">Dados pessoais</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label={t("auth.fullName")}>
+                  <Input value={form.full_name ?? ""} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
+                </Field>
+                <Field label="Data de nascimento">
+                  <Input type="date" value={form.date_of_birth ?? ""} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value || null })} />
+                </Field>
+                <Field label={`${t("profile.height")} (cm)`}>
+                  <Input type="number" inputMode="numeric" value={form.height_cm ?? ""} onChange={(e) => setForm({ ...form, height_cm: num(e.target.value) })} />
+                </Field>
+              </div>
+              <div className="border-t border-border/40 pt-4">
+                <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-3 flex items-center gap-2">
+                  <Heart className="w-3.5 h-3.5 text-primary" /> {t("profile.section.hr")}
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <Field label={t("profile.field.maxHr")}>
+                    <Input type="number" inputMode="numeric" value={form.max_hr ?? ""} onChange={(e) => setForm({ ...form, max_hr: num(e.target.value) })} />
+                  </Field>
+                  <Field label={t("profile.field.restHr")}>
+                    <Input type="number" inputMode="numeric" value={form.resting_hr ?? ""} onChange={(e) => setForm({ ...form, resting_hr: num(e.target.value) })} />
+                  </Field>
+                  <Field label={t("profile.field.vo2")}>
+                    <Input type="number" step="0.1" inputMode="decimal" value={form.vo2_max ?? ""} onChange={(e) => setForm({ ...form, vo2_max: num(e.target.value) })} />
+                  </Field>
+                </div>
+              </div>
+              <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
+              </Button>
+            </Card>
           )}
-          <p className="text-xs text-muted-foreground mt-1">{t("profile.photoHint")}</p>
-        </div>
-        <div className="flex flex-col gap-2">
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAvatarUpload(f); e.target.value = ""; }} />
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingAvatar || !canWrite}>
-            {uploadingAvatar ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
-            {form.avatar_url ? t("profile.changePhoto") : t("profile.uploadPhoto")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setEditingProfile(!editingProfile)}>
-            <Settings2 className="w-4 h-4" /> Editar perfil
-          </Button>
-        </div>
-      </Card>
 
-      {/* Métricas calculadas */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricCard label={t("profile.metric.bmi")} value={bmi != null ? bmi.toFixed(1) : "—"} hint={bmi ? bmiLabel(bmi) : t("profile.metric.bmiUnit")}
-          tooltip="IMC = peso / altura². Saudável entre 18.5 e 24.9." />
-        <MetricCard label={t("profile.metric.age")} value={age != null ? `${age}` : "—"} hint={t("profile.metric.ageUnit")} />
-        <MetricCard label={t("profile.metric.metabolicAge")} value={metabolicAge != null ? `${metabolicAge}` : "—"} hint={t("profile.metric.metabolicAgeHint")}
-          tooltip="Idade metabólica estimada com base no VO2max e IMC. Abaixo da tua idade real é excelente." />
-        <MetricCard label={t("profile.metric.vo2")} value={form.vo2_max != null ? form.vo2_max.toFixed(1) : "—"} hint={t("profile.metric.vo2Unit")}
-          tooltip="VO2max: capacidade aeróbica máxima em ml/kg/min. Acima de 50 é muito bom para atletas de trail." />
-      </div>
-
-      {/* Form de perfil */}
-      {editingProfile && (
-        <Card className="p-5 space-y-5">
-          <h3 className="text-sm font-semibold">Dados pessoais</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label={t("auth.fullName")}>
-              <Input value={form.full_name ?? ""} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
-            </Field>
-            <Field label="Data de nascimento">
-              <Input type="date" value={form.date_of_birth ?? ""} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value || null })} />
-            </Field>
-            <Field label={`${t("profile.height")} (cm)`}>
-              <Input type="number" inputMode="numeric" value={form.height_cm ?? ""} onChange={(e) => setForm({ ...form, height_cm: num(e.target.value) })} />
-            </Field>
-          </div>
-          <div className="border-t border-border/40 pt-4">
-            <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-3 flex items-center gap-2">
-              <Heart className="w-3.5 h-3.5 text-primary" /> {t("profile.section.hr")}
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <Field label={t("profile.field.maxHr")}>
-                <Input type="number" inputMode="numeric" value={form.max_hr ?? ""} onChange={(e) => setForm({ ...form, max_hr: num(e.target.value) })} />
-              </Field>
-              <Field label={t("profile.field.restHr")}>
-                <Input type="number" inputMode="numeric" value={form.resting_hr ?? ""} onChange={(e) => setForm({ ...form, resting_hr: num(e.target.value) })} />
-              </Field>
-              <Field label={t("profile.field.vo2")}>
-                <Input type="number" step="0.1" inputMode="decimal" value={form.vo2_max ?? ""} onChange={(e) => setForm({ ...form, vo2_max: num(e.target.value) })} />
-              </Field>
+          {/* Strava */}
+          <Card className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Activity className="w-4 h-4 text-orange-500" /> Strava
+                <Tooltip2 text="Liga o teu Strava para importar automaticamente as tuas atividades. Funciona com Garmin, Coros, Suunto e Polar." />
+              </h3>
+              {stravaConnected && <Badge className="bg-orange-500/15 text-orange-500 border-orange-500/30">✓ Ligado</Badge>}
             </div>
-          </div>
-          <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
-          </Button>
-        </Card>
-      )}
+            {stravaConnected ? (
+              <p className="text-xs text-muted-foreground">O Strava está ligado. As tuas atividades são importadas automaticamente.</p>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground">Liga o teu Strava para importar atividades de Garmin, Coros, Suunto e Polar automaticamente.</p>
+                <Button variant="outline" size="sm" onClick={connectStrava} disabled={stravaImporting}
+                  className="gap-2 border-orange-500/40 text-orange-500 hover:bg-orange-500/10">
+                  {stravaImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
+                  {stravaImporting ? "A importar..." : "Ligar Strava"}
+                </Button>
+              </>
+            )}
+          </Card>
 
-      {/* Strava */}
-      <Card className="p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Activity className="w-4 h-4 text-orange-500" /> Strava
-            <Tooltip2 text="Liga o teu Strava para importar automaticamente as tuas atividades dos últimos 90 dias. Funciona com Garmin, Coros, Suunto e Polar." />
-          </h3>
-          {stravaConnected && <Badge className="bg-orange-500/15 text-orange-500 border-orange-500/30">✓ Ligado</Badge>}
-        </div>
-        {stravaConnected ? (
-          <p className="text-xs text-muted-foreground">O Strava está ligado. As tuas atividades são importadas automaticamente para Treinos Livres.</p>
-        ) : (
-          <>
-            <p className="text-xs text-muted-foreground">Liga o teu Strava para importar atividades de Garmin, Coros, Suunto e Polar automaticamente.</p>
-            <Button variant="outline" size="sm" onClick={connectStrava} disabled={stravaImporting}
-              className="gap-2 border-orange-500/40 text-orange-500 hover:bg-orange-500/10">
-              {stravaImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
-              {stravaImporting ? "A importar..." : "Ligar Strava"}
-            </Button>
-          </>
-        )}
-      </Card>
+          {/* ITRA / ATRP */}
+          <Card className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Mountain className="w-4 h-4 text-primary" /> ITRA & ATRP
+                <Tooltip2 text="Performance Index ITRA e número de associado ATRP." />
+              </h3>
+              <Button variant="outline" size="sm" onClick={() => setEditingItra(!editingItra)}>
+                <Settings2 className="w-3.5 h-3.5" /> {editingItra ? "Fechar" : "Editar"}
+              </Button>
+            </div>
+            {!editingItra && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <div className="bg-muted/40 rounded-lg p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">ITRA Performance Index</div>
+                  <div className="font-semibold mt-1">{form.itra_performance_index ?? "—"}</div>
+                </div>
+                <div className="bg-muted/40 rounded-lg p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">ITRA ID</div>
+                  <div className="font-semibold mt-1 truncate">{form.itra_id ?? "—"}</div>
+                </div>
+                <div className="bg-muted/40 rounded-lg p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Nº Associado ATRP</div>
+                  <div className="font-semibold mt-1">{form.atrp_number ?? "—"}</div>
+                </div>
+                <div className="bg-muted/40 rounded-lg p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Perfil ITRA</div>
+                  {form.itra_profile_url ? (
+                    <a href={form.itra_profile_url} target="_blank" rel="noreferrer" className="text-primary text-xs underline mt-1 block">Ver perfil →</a>
+                  ) : (
+                    <div className="font-semibold mt-1">—</div>
+                  )}
+                </div>
+              </div>
+            )}
+            {editingItra && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="ITRA Performance Index">
+                    <Input type="number" inputMode="numeric" placeholder="ex: 650"
+                      value={form.itra_performance_index ?? ""}
+                      onChange={(e) => setForm({ ...form, itra_performance_index: num(e.target.value) })} />
+                  </Field>
+                  <Field label="ITRA ID (número de atleta)">
+                    <Input placeholder="ex: 123456" value={form.itra_id ?? ""}
+                      onChange={(e) => setForm({ ...form, itra_id: e.target.value })} />
+                  </Field>
+                  <Field label="Nº Associado ATRP">
+                    <Input placeholder="ex: ATRP-12345" value={form.atrp_number ?? ""}
+                      onChange={(e) => setForm({ ...form, atrp_number: e.target.value })} />
+                  </Field>
+                  <Field label="URL do perfil ITRA">
+                    <Input placeholder="https://itra.run/Runners/..." value={form.itra_profile_url ?? ""}
+                      onChange={(e) => setForm({ ...form, itra_profile_url: e.target.value })} />
+                  </Field>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  💡 Encontra o teu Performance Index em{" "}
+                  <a href="https://itra.run" target="_blank" rel="noreferrer" className="text-primary underline">itra.run</a>
+                  {" "}→ pesquisa o teu nome → abre o teu perfil.
+                </div>
+                <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
+                </Button>
+              </div>
+            )}
+          </Card>
 
-      {/* ITRA / ATRP */}
-      <Card className="p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Mountain className="w-4 h-4 text-primary" /> ITRA & ATRP
-            <Tooltip2 text="Performance Index ITRA e número de associado ATRP. Estes dados são usados pelo coach AI para calibrar os teus objetivos de prova." />
-          </h3>
-          <Button variant="outline" size="sm" onClick={() => setEditingItra(!editingItra)}>
-            <Settings2 className="w-3.5 h-3.5" /> {editingItra ? "Fechar" : "Editar"}
-          </Button>
-        </div>
-
-        {!editingItra && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <div className="bg-muted/40 rounded-lg p-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">ITRA Performance Index</div>
-              <div className="font-semibold mt-1">{form.itra_performance_index ?? "—"}</div>
-            </div>
-            <div className="bg-muted/40 rounded-lg p-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">ITRA ID</div>
-              <div className="font-semibold mt-1 truncate">{form.itra_id ?? "—"}</div>
-            </div>
-            <div className="bg-muted/40 rounded-lg p-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Nº Associado ATRP</div>
-              <div className="font-semibold mt-1">{form.atrp_number ?? "—"}</div>
-            </div>
-            <div className="bg-muted/40 rounded-lg p-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Perfil ITRA</div>
-              {form.itra_profile_url ? (
-                <a href={form.itra_profile_url} target="_blank" rel="noreferrer" className="text-primary text-xs underline mt-1 block">Ver perfil →</a>
-              ) : (
-                <div className="font-semibold mt-1">—</div>
+          {/* Peso */}
+          <Card className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Weight className="w-4 h-4 text-primary" /> Evolução do peso
+                <Tooltip2 text="Regista o teu peso diariamente para acompanhar a evolução nos últimos 90 dias." />
+              </h3>
+              {weightDelta && (
+                <Badge variant="outline" className={Number(weightDelta) < 0 ? "text-emerald-400 border-emerald-400/40" : "text-orange-400 border-orange-400/40"}>
+                  <TrendingDown className="w-3 h-3 mr-1" />
+                  {Number(weightDelta) > 0 ? "+" : ""}{weightDelta} kg
+                </Badge>
               )}
             </div>
-          </div>
-        )}
+            <div className="flex gap-2">
+              <Input type="number" step="0.1" inputMode="decimal" placeholder="Peso hoje (kg)" value={newWeight}
+                onChange={(e) => setNewWeight(e.target.value)} className="w-40" />
+              <Button size="sm" onClick={handleAddWeight} disabled={!newWeight}>Registar</Button>
+            </div>
+            {weightHistory.length > 1 ? (
+              <ResponsiveContainer width="100%" height={140}>
+                <LineChart data={weightHistory.map(w => ({ date: w.date.slice(5), kg: w.weight_kg }))}>
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                  <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={32} />
+                  <Tooltip formatter={(v: any) => [`${v} kg`, "Peso"]} />
+                  <Line type="monotone" dataKey="kg" stroke="hsl(var(--primary))" dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-xs text-muted-foreground">Regista pelo menos 2 dias para ver o gráfico.</p>
+            )}
+          </Card>
 
-        {editingItra && (
-          <div className="space-y-4">
+          {/* Configuração de treino */}
+          <Card className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-primary" /> Configuração de treino
+                <Tooltip2 text="Define as tuas preferências de treino. O coach AI usa estes dados para gerar os teus planos." />
+              </h3>
+              <Button variant="outline" size="sm" onClick={() => setEditingTraining(!editingTraining)}>
+                <Settings2 className="w-3.5 h-3.5" /> {editingTraining ? "Fechar" : "Configurar treino"}
+              </Button>
+            </div>
+            {!trainingConfigured && !editingTraining && (
+              <p className="text-xs text-orange-400">⚠️ Ainda não configuraste o teu treino. O coach AI não consegue gerar planos sem estes dados.</p>
+            )}
+            {trainingConfigured && !editingTraining && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                <div className="bg-muted/40 rounded-lg p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Pace base</div>
+                  <div className="font-semibold mt-1">{fmtPace(form.baseline_avg_pace_sec_per_km!)} min/km</div>
+                </div>
+                <div className="bg-muted/40 rounded-lg p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Km semanais</div>
+                  <div className="font-semibold mt-1">{form.baseline_km_per_week} km</div>
+                </div>
+                <div className="bg-muted/40 rounded-lg p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Dias de corrida</div>
+                  <div className="font-semibold mt-1">{form.available_run_days?.length} dias/semana</div>
+                </div>
+              </div>
+            )}
+            {editingTraining && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Pace base (min/km)">
+                    <Input type="text" inputMode="numeric" placeholder="ex: 5:30" value={paceInput}
+                      onChange={(e) => {
+                        setPaceInput(e.target.value);
+                        const sec = paceInputToSec(e.target.value);
+                        setForm({ ...form, baseline_avg_pace_sec_per_km: sec });
+                      }} />
+                    {form.baseline_avg_pace_sec_per_km && (
+                      <p className="text-xs text-muted-foreground mt-1">= {form.baseline_avg_pace_sec_per_km} seg/km</p>
+                    )}
+                  </Field>
+                  <Field label="Km semanais">
+                    <Input type="number" inputMode="numeric" value={form.baseline_km_per_week ?? ""}
+                      onChange={(e) => setForm({ ...form, baseline_km_per_week: num(e.target.value) })} />
+                  </Field>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-xs">{t("profile.field.runDays")}</Label>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {DAYS.map((d) => {
+                        const active = form.available_run_days?.includes(d.v);
+                        return (
+                          <Button key={d.v} type="button" size="sm" variant={active ? "default" : "outline"}
+                            onClick={() => {
+                              const cur = form.available_run_days ?? [];
+                              setForm({ ...form, available_run_days: active ? cur.filter((x) => x !== d.v) : [...cur, d.v].sort() });
+                            }}>{d.l}</Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs">{t("profile.field.strengthDays")}</Label>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {DAYS.map((d) => {
+                        const active = form.available_strength_days?.includes(d.v);
+                        return (
+                          <Button key={d.v} type="button" size="sm" variant={active ? "default" : "outline"}
+                            onClick={() => {
+                              const cur = form.available_strength_days ?? [];
+                              setForm({ ...form, available_strength_days: active ? cur.filter((x) => x !== d.v) : [...cur, d.v].sort() });
+                            }}>{d.l}</Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs">{t("profile.field.longRunDay")}</Label>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {DAYS.map((d) => (
+                        <Button key={d.v} type="button" size="sm"
+                          variant={form.long_run_day === d.v ? "default" : "outline"}
+                          onClick={() => setForm({ ...form, long_run_day: d.v })}>{d.l}</Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
+                </Button>
+              </div>
+            )}
+          </Card>
+
+          {/* Mudar password */}
+          <Card className="p-5 space-y-4">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-primary" /> {t("profile.changePwd")}
+            </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="ITRA Performance Index">
-                <Input type="number" inputMode="numeric" placeholder="ex: 650"
-                  value={form.itra_performance_index ?? ""}
-                  onChange={(e) => setForm({ ...form, itra_performance_index: num(e.target.value) })} />
+              <Field label={t("profile.newPwd")}>
+                <Input type="password" autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder={t("profile.pwdHint")} />
               </Field>
-              <Field label="ITRA ID (número de atleta)">
-                <Input placeholder="ex: 123456"
-                  value={form.itra_id ?? ""}
-                  onChange={(e) => setForm({ ...form, itra_id: e.target.value })} />
-              </Field>
-              <Field label="Nº Associado ATRP">
-                <Input placeholder="ex: ATRP-12345"
-                  value={form.atrp_number ?? ""}
-                  onChange={(e) => setForm({ ...form, atrp_number: e.target.value })} />
-              </Field>
-              <Field label="URL do perfil ITRA">
-                <Input placeholder="https://itra.run/Runners/..."
-                  value={form.itra_profile_url ?? ""}
-                  onChange={(e) => setForm({ ...form, itra_profile_url: e.target.value })} />
+              <Field label={t("profile.confirmPwd")}>
+                <Input type="password" autoComplete="new-password" value={pwd2} onChange={(e) => setPwd2(e.target.value)} />
               </Field>
             </div>
-            <div className="text-xs text-muted-foreground">
-              💡 Encontra o teu Performance Index em{" "}
-              <a href="https://itra.run" target="_blank" rel="noreferrer" className="text-primary underline">itra.run</a>
-              {" "}→ pesquisa o teu nome → abre o teu perfil.
-            </div>
-            <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
+            <ul className="text-xs space-y-1">
+              {[
+                { ok: pwd.length >= 8, label: "Pelo menos 8 caracteres" },
+                { ok: /[A-Z]/.test(pwd), label: "Uma letra maiúscula (A-Z)" },
+                { ok: /[a-z]/.test(pwd), label: "Uma letra minúscula (a-z)" },
+                { ok: /[0-9]/.test(pwd), label: "Um número (0-9)" },
+              ].map((c, i) => (
+                <li key={i} className={c.ok && pwd ? "text-emerald-500" : "text-muted-foreground"}>
+                  {c.ok && pwd ? "✓" : "○"} {c.label}
+                </li>
+              ))}
+            </ul>
+            <Button onClick={handlePasswordChange} disabled={pwdSaving || !pwd} variant="outline">
+              {pwdSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />} {t("profile.updatePwd")}
             </Button>
-          </div>
-        )}
-      </Card>
+          </Card>
 
-      {/* Peso */}
-      <Card className="p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Weight className="w-4 h-4 text-primary" /> Evolução do peso
-            <Tooltip2 text="Regista o teu peso diariamente para acompanhar a evolução nos últimos 90 dias." />
-          </h3>
-          {weightDelta && (
-            <Badge variant="outline" className={Number(weightDelta) < 0 ? "text-emerald-400 border-emerald-400/40" : "text-orange-400 border-orange-400/40"}>
-              <TrendingDown className="w-3 h-3 mr-1" />
-              {Number(weightDelta) > 0 ? "+" : ""}{weightDelta} kg
-            </Badge>
+          {/* Zonas */}
+          {zones && (
+            <Card className="p-5">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                {t("profile.zones")}
+                <Tooltip2 text="Zonas de treino calculadas com base na tua FC máx, FC repouso e pace base." />
+              </h3>
+              <div className="space-y-2">
+                {(["z1","z2","z3","z4","z5"] as const).map((k, i) => (
+                  <div key={k} className="flex items-center justify-between p-3 rounded-lg bg-muted/40 text-sm gap-2">
+                    <Badge variant="outline" className="border-primary/40 text-primary">Z{i+1}</Badge>
+                    <span>{zones[k].hr_min}–{zones[k].hr_max} bpm</span>
+                    <span className="font-mono">{fmtPace(zones[k].pace_sec_per_km)} min/km</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-3">{t("profile.zonesHint")}</p>
+            </Card>
           )}
-        </div>
-        <div className="flex gap-2">
-          <Input type="number" step="0.1" inputMode="decimal" placeholder="Peso hoje (kg)" value={newWeight}
-            onChange={(e) => setNewWeight(e.target.value)} className="w-40" />
-          <Button size="sm" onClick={handleAddWeight} disabled={!newWeight}>Registar</Button>
-        </div>
-        {weightHistory.length > 1 ? (
-          <ResponsiveContainer width="100%" height={140}>
-            <LineChart data={weightHistory.map(w => ({ date: w.date.slice(5), kg: w.weight_kg }))}>
-              <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-              <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={32} />
-              <Tooltip formatter={(v: any) => [`${v} kg`, "Peso"]} />
-              <Line type="monotone" dataKey="kg" stroke="hsl(var(--primary))" dot={false} strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <p className="text-xs text-muted-foreground">Regista pelo menos 2 dias para ver o gráfico.</p>
-        )}
-      </Card>
+        </TabsContent>
 
-      {/* Configuração de treino */}
-      <Card className="p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Settings2 className="w-4 h-4 text-primary" /> Configuração de treino
-            <Tooltip2 text="Define as tuas preferências de treino. O coach AI usa estes dados para gerar os teus planos." />
-          </h3>
-          <Button variant="outline" size="sm" onClick={() => setEditingTraining(!editingTraining)}>
-            <Settings2 className="w-3.5 h-3.5" /> {editingTraining ? "Fechar" : "Configurar treino"}
-          </Button>
-        </div>
-        {!trainingConfigured && !editingTraining && (
-          <p className="text-xs text-orange-400">⚠️ Ainda não configuraste o teu treino. O coach AI não consegue gerar planos sem estes dados.</p>
-        )}
-        {trainingConfigured && !editingTraining && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-            <div className="bg-muted/40 rounded-lg p-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Pace base</div>
-              <div className="font-semibold mt-1">{fmtPace(form.baseline_avg_pace_sec_per_km!)} min/km</div>
-            </div>
-            <div className="bg-muted/40 rounded-lg p-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Km semanais</div>
-              <div className="font-semibold mt-1">{form.baseline_km_per_week} km</div>
-            </div>
-            <div className="bg-muted/40 rounded-lg p-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Dias de corrida</div>
-              <div className="font-semibold mt-1">{form.available_run_days?.length} dias/semana</div>
-            </div>
-          </div>
-        )}
-        {editingTraining && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Pace base (min/km)">
-                <Input type="text" inputMode="numeric" placeholder="ex: 5:30" value={paceInput}
-                  onChange={(e) => {
-                    setPaceInput(e.target.value);
-                    const sec = paceInputToSec(e.target.value);
-                    setForm({ ...form, baseline_avg_pace_sec_per_km: sec });
-                  }} />
-                {form.baseline_avg_pace_sec_per_km && (
-                  <p className="text-xs text-muted-foreground mt-1">= {form.baseline_avg_pace_sec_per_km} seg/km</p>
-                )}
-              </Field>
-              <Field label="Km semanais">
-                <Input type="number" inputMode="numeric" value={form.baseline_km_per_week ?? ""}
-                  onChange={(e) => setForm({ ...form, baseline_km_per_week: num(e.target.value) })} />
-              </Field>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <Label className="text-xs">{t("profile.field.runDays")}</Label>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {DAYS.map((d) => {
-                    const active = form.available_run_days?.includes(d.v);
-                    return (
-                      <Button key={d.v} type="button" size="sm" variant={active ? "default" : "outline"}
-                        onClick={() => {
-                          const cur = form.available_run_days ?? [];
-                          setForm({ ...form, available_run_days: active ? cur.filter((x) => x !== d.v) : [...cur, d.v].sort() });
-                        }}>{d.l}</Button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">{t("profile.field.strengthDays")}</Label>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {DAYS.map((d) => {
-                    const active = form.available_strength_days?.includes(d.v);
-                    return (
-                      <Button key={d.v} type="button" size="sm" variant={active ? "default" : "outline"}
-                        onClick={() => {
-                          const cur = form.available_strength_days ?? [];
-                          setForm({ ...form, available_strength_days: active ? cur.filter((x) => x !== d.v) : [...cur, d.v].sort() });
-                        }}>{d.l}</Button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">{t("profile.field.longRunDay")}</Label>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {DAYS.map((d) => (
-                    <Button key={d.v} type="button" size="sm"
-                      variant={form.long_run_day === d.v ? "default" : "outline"}
-                      onClick={() => setForm({ ...form, long_run_day: d.v })}>{d.l}</Button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {t("common.save")}
-            </Button>
-          </div>
-        )}
-      </Card>
-
-      {/* Mudar password */}
-      <Card className="p-5 space-y-4">
-        <h3 className="text-sm font-semibold flex items-center gap-2">
-          <KeyRound className="w-4 h-4 text-primary" /> {t("profile.changePwd")}
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label={t("profile.newPwd")}>
-            <Input type="password" autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder={t("profile.pwdHint")} />
-          </Field>
-          <Field label={t("profile.confirmPwd")}>
-            <Input type="password" autoComplete="new-password" value={pwd2} onChange={(e) => setPwd2(e.target.value)} />
-          </Field>
-        </div>
-        <ul className="text-xs space-y-1">
-          {[
-            { ok: pwd.length >= 8, label: "Pelo menos 8 caracteres" },
-            { ok: /[A-Z]/.test(pwd), label: "Uma letra maiúscula (A-Z)" },
-            { ok: /[a-z]/.test(pwd), label: "Uma letra minúscula (a-z)" },
-            { ok: /[0-9]/.test(pwd), label: "Um número (0-9)" },
-          ].map((c, i) => (
-            <li key={i} className={c.ok && pwd ? "text-emerald-500" : "text-muted-foreground"}>
-              {c.ok && pwd ? "✓" : "○"} {c.label}
-            </li>
-          ))}
-        </ul>
-        <Button onClick={handlePasswordChange} disabled={pwdSaving || !pwd} variant="outline">
-          {pwdSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />} {t("profile.updatePwd")}
-        </Button>
-      </Card>
-
-      {/* Zonas */}
-      {zones && (
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-            {t("profile.zones")}
-            <Tooltip2 text="Zonas de treino calculadas com base na tua FC máx, FC repouso e pace base. Usa-as para controlar a intensidade dos treinos." />
-          </h3>
-          <div className="space-y-2">
-            {(["z1","z2","z3","z4","z5"] as const).map((k, i) => (
-              <div key={k} className="flex items-center justify-between p-3 rounded-lg bg-muted/40 text-sm gap-2">
-                <Badge variant="outline" className="border-primary/40 text-primary">Z{i+1}</Badge>
-                <span>{zones[k].hr_min}–{zones[k].hr_max} bpm</span>
-                <span className="font-mono">{fmtPace(zones[k].pace_sec_per_km)} min/km</span>
-              </div>
-            ))}
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-3">{t("profile.zonesHint")}</p>
-        </Card>
-      )}
+        {/* Tab Biometria */}
+        <TabsContent value="biometrics" className="mt-4">
+          <BiometricsPage />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
