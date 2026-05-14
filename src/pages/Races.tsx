@@ -745,7 +745,11 @@ export default function RacesPage() {
       }
 
       // Inserir em batches de 500
-      const rows = generated.map(w => ({ ...w, user_id: userId }));
+      const rows = generated.map(w => ({
+  ...w,
+  user_id: userId,
+  race_id: w.race_id && w.race_id !== "maintenance" ? w.race_id : null,
+}));
       for (let i = 0; i < rows.length; i += 500) {
         const { error } = await supabase.from("planned_workouts").insert(rows.slice(i, i + 500) as any);
         if (error) throw error;
