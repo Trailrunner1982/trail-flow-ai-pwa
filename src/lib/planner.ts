@@ -210,4 +210,74 @@ export function generatePlan(input: PlannerInput): PlannedWorkout[] {
           "Aquecimento 15min Z2 + bloco Z3 contínuo + 10min Z2.", qualityKm, 0, null, paceForZone(baselineAvgPaceSecPerKm, "Z3"));
       } else {
         addOnDay(qualityDays[0], "intervals", "Z4", `Intervalos ${qualityKm} km`,
-          "Aquecimento 15min Z2 + 6x3min Z4 rec 2min Z1 + 10min Z2.", qualityKm, 0, null, paceF
+          "Aquecimento 15min Z2 + 6x3min Z4 rec 2min Z1 + 10min Z2.", qualityKm, 0, null, paceForZone(baselineAvgPaceSecPerKm, "Z4"));
+      }
+    }
+
+    // Fácil Z2
+    if (qualityDays[1] !== undefined)
+      addOnDay(qualityDays[1], "easy_z2", "Z2", `Easy Z2 ${easyKm} km`,
+        "Conversational. Mantém HR no topo de Z2.", easyKm, Math.round(targetVert * 0.10), null, paceForZone(baselineAvgPaceSecPerKm, "Z2"));
+
+    // Vert session
+    if (easyDays[0] !== undefined)
+      addOnDay(easyDays[0], "vert_session", "Z3", `Sessão de Vert ${vertKm} km / ${Math.round(targetVert * 0.45)}D+`,
+        "Foco no D+ da semana. Power-hike nas rampas acima de 12%, corre nas suaves.", vertKm, Math.round(targetVert * 0.45), null, null);
+
+    // Força
+    if (availableStrengthDays[0] !== undefined)
+      addOnDay(availableStrengthDays[0], "strength", null, "Força 30-40 min",
+        "Agachamentos, lunges, single leg, core. Foco em pernas e cadeia posterior.");
+
+    // Long run ou prova secundária
+    if (secondaryInWeek.length > 0) {
+      const secRaceDate = secondaryInWeek[0];
+      const secRace = secondaryRaceMap.get(secRaceDate)!;
+      workouts.push({
+        workout_date: secRaceDate, workout_type: "race", zone: null,
+        target_distance_km: null, target_elevation_m: null,
+        target_duration_min: null, target_pace_sec_per_km: null,
+        title: `🏁 Prova ${secRace.priority}: ${secRace.name}`,
+        description: `Prova de prioridade ${secRace.priority}. Usa como simulação — começa controlado.`,
+        week_number: w + 1, phase,
+      });
+    } else if (isRepeatedBoutWeek) {
+      addOnDay(longRunDay, "downhill_repeats", "Z3", `Long + Downhill Repeats ${longRunKm} km`,
+        "Long run com foco excêntrico: nos últimos 30 min, faz 4-6x descidas íngremes. Cria o Repeated Bout Effect.",
+        longRunKm, Math.round(targetVert * 0.45), null, paceForZone(baselineAvgPaceSecPerKm, "Z2"));
+    } else {
+      addOnDay(longRunDay, "long_run", "Z2", `Long Run ${longRunKm} km / ${Math.round(targetVert * 0.45)}D+`,
+        describeLongRun(terrainProfile, longRunKm, Math.round(targetVert * 0.45)),
+        longRunKm, Math.round(targetVert * 0.45), null, paceForZone(baselineAvgPaceSecPerKm, "Z2"));
+    }
+
+    // Recovery
+    if (recoveryKm > 0 && easyDays[1] !== undefined)
+      addOnDay(easyDays[1], "recovery", "Z1", `Recovery ${recoveryKm} km`,
+        "Trote muito leve para promover circulação. RPE 2-3.", recoveryKm, 0, null, paceForZone(baselineAvgPaceSecPerKm, "Z1"));
+  }
+
+  const raceDateStr = format(raceDateLocal, "yyyy-MM-dd");
+  return workouts.filter(wo => wo.workout_date <= raceDateStr);
+}
+
+function describeLongRun(profile: TerrainProfile, km: number, vert: number): string {
+  if (profile === "rolling") return `Trail ondulado ${km} km / ${vert}D+. Mantém ritmo estável. Foco em economia de movimento.`;
+  if (profile === "big_climbs") return `Trail com subidas longas ${km} km / ${vert}D+. Power-hike nas rampas acima de 15%.`;
+  if (profile === "sustained") return `Subida sustentada moderada ${km} km / ${vert}D+. Alterna corrida e marcha.`;
+  return `Long run terreno variado ${km} km / ${vert}D+. Aproxima-te do perfil da tua prova âncora.`;
+}
+
+export function formatPace(secPerKm: number | null): string {
+  if (!secPerKm) return "--";
+  const m = Math.floor(secPerKm / 60);
+  const s = secPerKm % 60;
+  return `${m}:${s.toString().padStart(2, "0")}/km`;
+}
+
+export function formatDuration(minutes: number | null): string {
+  if (!minutes) return "--";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h${m.toString().padStart(2, "0")}` : `${m}min`;
+}
