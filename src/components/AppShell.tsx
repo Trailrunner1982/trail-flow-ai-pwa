@@ -102,7 +102,8 @@ export function AppShell() {
         <header className="lg:hidden flex items-center justify-between p-4 border-b border-border/60 bg-card/80 backdrop-blur-md sticky top-0 z-40">
           <div className="flex items-center gap-2">
             <Mountain className="w-6 h-6 text-primary" />
-            <span className="font-bold">Trail Forge</span>
+            <span className="text-sidebar-foreground font-semibold">Trail Forge</span>
+<span className="text-sidebar-foreground/60 text-xs">Plano adaptativo</span>
           </div>
           <div className="flex items-center gap-1">
             <InstallPWA />
