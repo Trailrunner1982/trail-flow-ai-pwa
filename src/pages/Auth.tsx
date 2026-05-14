@@ -122,14 +122,24 @@ export default function AuthPage() {
             <span className="text-sm font-semibold tracking-widest uppercase">Trail Forge</span>
           </div>
           <div>
-            <h2 className="text-3xl font-bold">Entra na montanha</h2>
+            <h2 className="text-3xl font-bold text-foreground">Entra na montanha</h2>
             <p className="text-muted-foreground mt-2">O teu plano adaptativo começa aqui.</p>
           </div>
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login">Entrar</TabsTrigger>
-              <TabsTrigger value="signup">Registar</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-2 bg-muted">
+              <TabsTrigger
+                value="login"
+                className="text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground"
+              >
+                Entrar
+              </TabsTrigger>
+              <TabsTrigger
+                value="signup"
+                className="text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground"
+              >
+                Registar
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="login" />
             <TabsContent value="signup" />
@@ -137,15 +147,30 @@ export default function AuthPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" autoComplete="email" required value={email}
-                onChange={(e) => setEmail(e.target.value)} placeholder="atleta@trail.com" />
+              <Label htmlFor="email" className="text-foreground">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="atleta@trail.com"
+                className="bg-input text-foreground placeholder:text-muted-foreground border-border"
+              />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password"
+              <Label htmlFor="password" className="text-foreground">Password</Label>
+              <Input
+                id="password"
+                type="password"
                 autoComplete={tab === "login" ? "current-password" : "new-password"}
-                required value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} />
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                minLength={6}
+                className="bg-input text-foreground placeholder:text-muted-foreground border-border"
+              />
             </div>
             <Button type="submit" disabled={submitting} variant="hero" size="lg" className="w-full">
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
