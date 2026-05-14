@@ -60,8 +60,8 @@ export function AppShell() {
           <div className="flex items-center gap-2 mb-8">
             <Mountain className="w-7 h-7 text-primary" />
             <div>
-              <div className="font-bold tracking-tight">Trail Forge</div>
-              <div className="text-xs text-muted-foreground">{t("app.subtitle")}</div>
+              <div className="font-bold tracking-tight text-sidebar-foreground">Trail Forge</div>
+              <div className="text-xs text-sidebar-foreground/60">{t("app.subtitle")}</div>
             </div>
           </div>
           <nav className="flex flex-col gap-1 flex-1 overflow-y-auto">
@@ -103,7 +103,7 @@ export function AppShell() {
           <div className="flex items-center gap-2">
             <Mountain className="w-6 h-6 text-primary" />
             <span className="text-sidebar-foreground font-semibold">Trail Forge</span>
-<span className="text-sidebar-foreground/60 text-xs">Plano adaptativo</span>
+            <span className="text-sidebar-foreground/60 text-xs">Plano adaptativo</span>
           </div>
           <div className="flex items-center gap-1">
             <InstallPWA />
