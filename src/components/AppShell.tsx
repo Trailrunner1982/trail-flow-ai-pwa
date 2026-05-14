@@ -23,13 +23,13 @@ const NAV_DESKTOP = [
   { to: "/profile", labelKey: "nav.profile", icon: User },
 ];
 
-// Bottom nav mobile — apenas 5 itens
+// Bottom nav mobile — 5 itens
 const NAV_MOBILE = [
   { to: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { to: "/races", labelKey: "nav.races", icon: Flag },
-  { to: "/biometrics", labelKey: "nav.biometrics", icon: HeartPulse },
   { to: "/calendar", labelKey: "nav.workouts", icon: Calendar },
   { to: "/coach", labelKey: "nav.coach", icon: Brain },
+  { to: "/profile", labelKey: "nav.profile", icon: User },
 ];
 
 export function AppShell() {
