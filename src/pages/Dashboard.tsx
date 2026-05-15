@@ -283,7 +283,7 @@ export default function DashboardPage() {
             <div className="text-[10px] uppercase tracking-wide text-primary mb-1">{t("dash.todayWorkout")}</div>
             {todayWorkout ? (
               <>
-                <h2 className="text-xl font-bold">{todayWorkout.title}</h2>
+                <h2 className="text-xl font-bold text-foreground">{todayWorkout.title}</h2>
                 <div className="flex gap-3 mt-2 text-sm flex-wrap text-muted-foreground">
                   {todayWorkout.target_distance_km != null && <span><strong className="text-foreground">{todayWorkout.target_distance_km}</strong> km</span>}
                   {todayWorkout.target_elevation_m != null && todayWorkout.target_elevation_m > 0 && <span><strong className="text-foreground">{todayWorkout.target_elevation_m}</strong> D+</span>}
