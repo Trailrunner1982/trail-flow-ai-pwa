@@ -551,20 +551,41 @@ export default function RacesPage() {
               </Badge>
               <p className="font-medium">{viability.result.headline}</p>
               <p className="text-sm text-muted-foreground">{viability.result.reasoning}</p>
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="p-2 rounded bg-muted/40">
-                  <div className="text-muted-foreground">km/sem alvo</div>
-                  <div className="font-bold text-base">{viability.result.recommended_weekly_km}</div>
-                </div>
-                <div className="p-2 rounded bg-muted/40">
-                  <div className="text-muted-foreground">Long run alvo</div>
-                  <div className="font-bold text-base">{viability.result.recommended_long_run_km} km</div>
-                </div>
-                <div className="p-2 rounded bg-muted/40">
-                  <div className="text-muted-foreground">Mín. semanas</div>
-                  <div className="font-bold text-base">{viability.result.min_weeks_needed}</div>
-                </div>
-              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+  <div className="p-2 rounded bg-muted/40">
+    <div className="text-muted-foreground">km/sem alvo</div>
+    <div className="font-bold text-base">{viability.result.recommended_weekly_km}</div>
+    {viability.result.recommended_weekly_hours && (
+      <div className="text-muted-foreground text-[10px]">~{viability.result.recommended_weekly_hours}h</div>
+    )}
+  </div>
+  <div className="p-2 rounded bg-muted/40">
+    <div className="text-muted-foreground">Long run alvo</div>
+    <div className="font-bold text-base">{viability.result.recommended_long_run_km} km</div>
+    {viability.result.recommended_long_run_min && (
+      <div className="text-muted-foreground text-[10px]">~{Math.round(viability.result.recommended_long_run_min / 60 * 10) / 10}h</div>
+    )}
+  </div>
+  <div className="p-2 rounded bg-muted/40">
+    <div className="text-muted-foreground">Mín. semanas</div>
+    <div className="font-bold text-base">{viability.result.min_weeks_needed}</div>
+  </div>
+  <div className="p-2 rounded bg-muted/40">
+    <div className="text-muted-foreground">Confiança</div>
+    <div className="font-bold text-base">{viability.result.confidence}%</div>
+  </div>
+</div>
+
+{viability.result.key_sessions?.length > 0 && (
+  <div>
+    <div className="text-xs uppercase text-muted-foreground mb-1">Treinos chave</div>
+    <ul className="text-sm space-y-1">
+      {viability.result.key_sessions.map((s: string, i: number) => (
+        <li key={i} className="flex gap-2"><span className="text-primary">→</span>{s}</li>
+      ))}
+    </ul>
+  </div>
+)}
               {viability.result.risks?.length > 0 && (
                 <div>
                   <div className="text-xs uppercase text-muted-foreground mb-1">Riscos</div>
