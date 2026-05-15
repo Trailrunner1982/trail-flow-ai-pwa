@@ -277,7 +277,7 @@ export default function DashboardPage() {
       )}
 
       {/* Treino de hoje */}
-      <Card className="p-6 bg-gradient-to-br from-primary/10 via-background to-background border-primary/30">
+      <Card className="p-6 border-primary/30">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="flex-1 min-w-0">
             <div className="text-[10px] uppercase tracking-wide text-primary mb-1">{t("dash.todayWorkout")}</div>
