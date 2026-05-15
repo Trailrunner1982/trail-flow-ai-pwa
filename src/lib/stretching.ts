@@ -469,7 +469,6 @@ const SORENESS_TO_ZONE: Record<string, MuscleZone[]> = {
   "ombro": ["shoulders"],
   "joelho": ["quadriceps", "it_band", "calves"],
   // English fallback
-  "quads": ["quadriceps"],
   "hamstrings": ["hamstrings"],
   "calves": ["calves"],
   "ankle": ["ankles"],
