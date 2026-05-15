@@ -141,37 +141,18 @@
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
 
-/* ── Tabs shadcn — fix legibilidade ── */
-@layer utilities {
-  [role="tab"] {
-    color: hsl(var(--muted-foreground)) !important;
-  }
-  [role="tab"][data-state="active"] {
-    background-color: hsl(var(--card)) !important;
-    color: hsl(var(--foreground)) !important;
-    font-weight: 500 !important;
-  }
-  [role="tablist"] {
-    background-color: hsl(var(--muted)) !important;
-  }
-}
-
-/* Fora de @layer — maior especificidade para sobrepor shadcn */
+/* ── Tabs shadcn — fix legibilidade ─────────────────────────────────────────
+   NOTA: sem !important nos h1-h4 nem nos cards.
+   O card-foreground do shadcn já trata das cores correctamente.
+   Só fixamos os tabs que o shadcn não aplica bem em dark mode.
+   ─────────────────────────────────────────────────────────────────────────── */
 .dark [role="tab"] {
-  color: hsl(220 12% 65%) !important;
+  color: hsl(220 12% 65%);
 }
 .dark [role="tab"][data-state="active"] {
-  color: hsl(40 25% 95%) !important;
-  background-color: hsl(220 25% 11%) !important;
+  color: hsl(40 25% 95%);
+  background-color: hsl(220 25% 11%);
 }
 .dark [role="tablist"] {
-  background-color: hsl(220 20% 16%) !important;
-}
-
-/* Fix CardTitle e headers em dark mode */
-.dark .text-foreground,
-.dark [class*="CardTitle"],
-.dark [class*="card-title"],
-.dark h1, .dark h2, .dark h3, .dark h4 {
-  color: hsl(40 25% 95%) !important;
+  background-color: hsl(220 20% 16%);
 }
