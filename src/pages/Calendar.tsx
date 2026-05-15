@@ -22,6 +22,7 @@ import { useLanguage } from "@/lib/i18n";
 import { AdaptPlanCard } from "@/components/AdaptPlanCard";
 import { computeReadiness } from "./Biometrics";
 import StrengthPage from "./Strength";
+import MobilityPage from "./Mobility";
 
 export default function CalendarPage() {
   const { userId, canWrite } = useEffectiveUser();
@@ -41,8 +42,10 @@ export default function CalendarPage() {
     const [{ data: p }, { data: c }, { data: bio }, { data: race }] = await Promise.all([
       supabase.from("planned_workouts").select("*").eq("user_id", userId).order("workout_date"),
       supabase.from("completed_workouts").select("*").eq("user_id", userId),
-      supabase.from("daily_biometrics").select("*").eq("user_id", userId).eq("measurement_date", today).maybeSingle(),
-      supabase.from("races").select("*").eq("user_id", userId).eq("priority", "A").gte("race_date", today).order("race_date").limit(1).maybeSingle(),
+      supabase.from("daily_biometrics").select("*").eq("user_id", userId)
+        .eq("measurement_date", today).maybeSingle(),
+      supabase.from("races").select("*").eq("user_id", userId).eq("priority", "A")
+        .gte("race_date", today).order("race_date").limit(1).maybeSingle(),
     ]);
     setPlanned((p ?? []) as any);
     setCompleted((c ?? []) as any);
@@ -77,7 +80,8 @@ export default function CalendarPage() {
           .select()
           .single();
         if (error) throw error;
-        await supabase.from("planned_workouts").update({ is_completed: true }).eq("id", plannedWO.id ?? "").then(() => null);
+        await supabase.from("planned_workouts").update({ is_completed: true })
+          .eq("id", plannedWO.id ?? "").then(() => null);
         return upd as any;
       }
       const { data: ins, error } = await supabase
@@ -134,13 +138,11 @@ export default function CalendarPage() {
     },
   }), [userId, canWrite, completed, planned, fetchAll]);
 
-  // Plano demo — usa o mesmo generateSeasonPlan com configuração padrão
   const handleGenerateDemo = async () => {
     if (!userId) return;
     if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
     setGenerating(true);
     try {
-      // Buscar perfil para usar dias configurados pelo atleta
       const { data: profile } = await supabase
         .from("profiles")
         .select("baseline_km_per_week, baseline_avg_pace_sec_per_km, available_run_days, available_strength_days, long_run_day")
@@ -152,7 +154,6 @@ export default function CalendarPage() {
       const availableStrengthDays = (profile?.available_strength_days as number[]) ?? [2, 4];
       const longRunDay = profile?.long_run_day ?? 0;
 
-      // Prova demo a 12 semanas
       const raceDate = addDays(new Date(), 84);
       const raceDateStr = format(raceDate, "yyyy-MM-dd");
 
@@ -169,19 +170,11 @@ export default function CalendarPage() {
           target_time_minutes: null,
           target_pace_sec_per_km: null,
         }],
-        baselineKm,
-        baselinePace,
-        availableRunDays,
-        availableStrengthDays,
-        longRunDay,
+        baselineKm, baselinePace,
+        availableRunDays, availableStrengthDays, longRunDay,
       });
 
-      const rows = generated.map((w) => ({
-        ...w,
-        user_id: userId,
-        race_id: w.race_id ?? null,
-      }));
-
+      const rows = generated.map((w) => ({ ...w, user_id: userId, race_id: w.race_id ?? null }));
       const { error } = await supabase.from("planned_workouts").insert(rows as any);
       if (error) throw error;
       toast.success(`Plano demo gerado: ${rows.length} treinos`);
@@ -195,14 +188,17 @@ export default function CalendarPage() {
 
   if (loading) return <LoadingScreen />;
 
+  // Verificar se há dor reportada para mostrar indicador no tab mobilidade
+  const hasSoreness = (todayBio?.soreness_zones as string[] | null)?.length ?? 0 > 0;
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2 text-foreground">
             <CalendarIcon className="w-6 h-6 text-primary" /> Treinos
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">Plano de corrida e sessões de força.</p>
+          <p className="text-sm text-muted-foreground mt-1">Plano de corrida, força e mobilidade.</p>
         </div>
         {tab === "workouts" && (
           <div className="flex items-center gap-2 flex-wrap">
@@ -221,12 +217,18 @@ export default function CalendarPage() {
           <TabsTrigger value="strength">
             <Dumbbell className="w-3.5 h-3.5 mr-1.5" /> Força
           </TabsTrigger>
+          <TabsTrigger value="mobility" className="relative">
+            🧘 Mobilidade
+            {hasSoreness && (
+              <span className="ml-1.5 w-2 h-2 rounded-full bg-amber-500 inline-block shrink-0" />
+            )}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="workouts" className="mt-4">
           {planned.length === 0 ? (
             <Card className="p-8 text-center space-y-4">
-              <div className="text-lg font-medium">{t("cal.noPlan")}</div>
+              <div className="text-lg font-medium text-foreground">{t("cal.noPlan")}</div>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">{t("cal.demoHint")}</p>
               <Button onClick={handleGenerateDemo} disabled={generating}>
                 <Sparkles className="w-4 h-4" /> {t("cal.generateDemo")}
@@ -247,6 +249,10 @@ export default function CalendarPage() {
 
         <TabsContent value="strength" className="mt-4">
           <StrengthPage />
+        </TabsContent>
+
+        <TabsContent value="mobility" className="mt-4">
+          <MobilityPage />
         </TabsContent>
       </Tabs>
     </div>
