@@ -206,3 +206,14 @@
 .dark h1, .dark h2, .dark h3, .dark h4 {
   color: hsl(40 25% 95%) !important;
 }
+/* Fix legibilidade — forçar cor de texto em elementos que herdam mal */
+.dark h1, .dark h2, .dark h3,
+.dark p, .dark span, .dark div {
+  color: inherit;
+}
+
+.dark .text-foreground,
+.dark [class*="font-bold"],
+.dark [class*="font-semibold"] {
+  color: hsl(var(--foreground));
+}
