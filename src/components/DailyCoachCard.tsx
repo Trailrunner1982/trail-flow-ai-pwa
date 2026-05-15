@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sparkles, Loader2, Eye, Pencil, Check, X } from "lucide-react";
+import { Sparkles, Loader2, Eye, Pencil, Check, X, ChevronDown, ChevronUp } from "lucide-react";
 import { format, subDays } from "date-fns";
 import { toast } from "sonner";
+import { getMobilitySuggestions, type MobilitySuggestion } from "@/lib/stretching";
 import type { CalendarPlannedWorkout } from "./calendar/types";
 
 interface Recommendation {
@@ -59,6 +60,7 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
   const [saving, setSaving] = useState(false);
   const [rec, setRec] = useState<Recommendation | null>(null);
   const [editing, setEditing] = useState(false);
+  const [mobilityExpanded, setMobilityExpanded] = useState(false);
   const [form, setForm] = useState<EditForm>({
     distance_km: "", elevation_m: "", duration_min: "", pace_sec_per_km: "", zone: "",
   });
@@ -73,6 +75,29 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
     });
   };
 
+  // Sugestões de mobilidade baseadas na biometria e no treino de hoje
+  const mobilitySuggestions: MobilitySuggestion[] = useMemo(() => {
+    const sorenessZones = todayBio?.soreness_zones as string[] | null;
+    const workoutType = todayWorkout?.workout_type ?? null;
+    const rpe = rec?.verdict === "go" ? 7 : rec?.verdict === "easy" ? 4 : null;
+
+    // Só mostrar se há dor reportada ou treino intenso
+    const hasSoreness = sorenessZones && sorenessZones.length > 0;
+    const isIntenseWorkout = workoutType && [
+      "intervals", "hill_repeats", "downhill_repeats", "tempo", "long_run", "vert_session",
+    ].includes(workoutType);
+
+    if (!hasSoreness && !isIntenseWorkout) return [];
+
+    return getMobilitySuggestions({
+      workoutType,
+      rpe,
+      sorenessZones,
+      timing: "after",
+      maxResults: 4,
+    });
+  }, [todayBio, todayWorkout, rec]);
+
   const run = useCallback(async () => {
     if (!user) return;
     setLoading(true);
@@ -82,27 +107,18 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
       const monthAgo = format(subDays(new Date(), 30), "yyyy-MM-dd");
 
       const [{ data: bio }, { data: rpe }, { data: stravaActivities }] = await Promise.all([
-        supabase
-          .from("daily_biometrics")
+        supabase.from("daily_biometrics")
           .select("measurement_date,sleep_score,hrv,stress_level,body_battery,energy_level,soreness_score,soreness_zones,mood,weight_kg")
-          .eq("user_id", user.id)
-          .gte("measurement_date", weekAgo)
-          .lte("measurement_date", today)
+          .eq("user_id", user.id).gte("measurement_date", weekAgo).lte("measurement_date", today)
           .order("measurement_date", { ascending: false }),
-        supabase
-          .from("completed_workouts")
-          .select("workout_date,rpe,actual_distance_km")
-          .eq("user_id", user.id)
-          .gte("workout_date", weekAgo)
-          .lte("workout_date", today)
+        supabase.from("completed_workouts")
+          .select("workout_date,rpe,actual_distance_km").eq("user_id", user.id)
+          .gte("workout_date", weekAgo).lte("workout_date", today)
           .order("workout_date", { ascending: false }),
-        supabase
-          .from("free_workouts")
+        supabase.from("free_workouts")
           .select("workout_date,activity,distance_km,duration_min,elevation_m,avg_hr,avg_pace_sec_per_km")
-          .eq("user_id", user.id)
-          .gte("workout_date", monthAgo)
-          .order("workout_date", { ascending: false })
-          .limit(30),
+          .eq("user_id", user.id).gte("workout_date", monthAgo)
+          .order("workout_date", { ascending: false }).limit(30),
       ]);
 
       const { data, error } = await supabase.functions.invoke("daily-coach", {
@@ -123,6 +139,9 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
       seedFromRec(result);
       setEditing(false);
 
+      // Auto-expandir mobilidade se há dor ou treino intenso
+      if (mobilitySuggestions.length > 0) setMobilityExpanded(true);
+
       await supabase.from("ai_feedback").insert({
         user_id: user.id,
         feedback_date: today,
@@ -136,7 +155,7 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
     } finally {
       setLoading(false);
     }
-  }, [user, todayWorkout, todayBio, readiness]);
+  }, [user, todayWorkout, todayBio, readiness, mobilitySuggestions.length]);
 
   const applyToToday = useCallback(async () => {
     if (!user || !rec) return;
@@ -196,6 +215,10 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
     );
   }, [form, rec, todayWorkout]);
 
+  // Mostrar mobilidade mesmo sem análise do coach se há dor reportada
+  const showMobility = mobilitySuggestions.length > 0;
+  const hasSoreness = (todayBio?.soreness_zones as string[] | null)?.length ?? 0 > 0;
+
   return (
     <Card className="p-5 border-primary/20">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -204,7 +227,7 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
             <Sparkles className="w-4 h-4 text-primary" />
           </div>
           <div>
-            <div className="text-sm font-semibold">Coach diário</div>
+            <div className="text-sm font-semibold text-foreground">Coach diário</div>
             <div className="text-[11px] text-muted-foreground">Recomendação com base na tua biometria + RPE + atividades recentes</div>
           </div>
         </div>
@@ -221,7 +244,7 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
             <Badge variant="outline" className={verdictMeta[rec.verdict].cls}>
               {verdictMeta[rec.verdict].label}
             </Badge>
-            <span className="text-sm font-medium">{rec.headline}</span>
+            <span className="text-sm font-medium text-foreground">{rec.headline}</span>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">{rec.reasoning}</p>
 
@@ -230,13 +253,15 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Ajustes</div>
               <ul className="space-y-1">
                 {rec.adjustments.map((a, i) => (
-                  <li key={i} className="text-sm flex gap-2"><span className="text-primary">→</span>{a}</li>
+                  <li key={i} className="text-sm flex gap-2 text-foreground">
+                    <span className="text-primary">→</span>{a}
+                  </li>
                 ))}
               </ul>
             </div>
           )}
 
-          <div className="rounded-lg border border-border/60 bg-card p-3 space-y-3">
+          <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
                 {editing ? "Edita os valores antes de guardar" : "Versão sugerida para hoje"}
@@ -289,11 +314,93 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
           )}
         </div>
       )}
+
+      {/* ── Sugestões de mobilidade ── */}
+      {showMobility && (
+        <div className="mt-4 border-t border-border/40 pt-4">
+          <button
+            onClick={() => setMobilityExpanded(!mobilityExpanded)}
+            className="w-full flex items-center justify-between gap-2 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">🧘 Mobilidade recomendada</span>
+              {hasSoreness && (
+                <Badge variant="outline" className="text-[10px] bg-amber-500/15 text-amber-500 border-amber-500/30">
+                  Dor reportada
+                </Badge>
+              )}
+              <span className="text-xs text-muted-foreground">{mobilitySuggestions.length} exercícios</span>
+            </div>
+            {mobilityExpanded
+              ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
+              : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+
+          {mobilityExpanded && (
+            <div className="mt-3 space-y-2 animate-fade-in">
+              {mobilitySuggestions.map((s, i) => (
+                <MobilityMiniCard key={s.exercise.id} suggestion={s} index={i + 1} />
+              ))}
+              <p className="text-xs text-muted-foreground text-center pt-1">
+                Ver programa completo em <strong>Treinos → Mobilidade</strong>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </Card>
   );
 }
 
-function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+// ── Card compacto de mobilidade para o DailyCoachCard ────────────────────────
+
+function MobilityMiniCard({ suggestion, index }: { suggestion: MobilitySuggestion; index: number }) {
+  const { exercise, reason, urgency } = suggestion;
+  const [expanded, setExpanded] = useState(false);
+
+  const urgencyColor = urgency === "high"
+    ? "border-amber-500/30 bg-amber-500/5"
+    : urgency === "medium"
+    ? "border-primary/20 bg-primary/5"
+    : "border-border/40 bg-muted/20";
+
+  const durationLabel = exercise.duration_sec >= 60
+    ? `${Math.round(exercise.duration_sec / 60)} min`
+    : `${exercise.duration_sec} seg`;
+
+  return (
+    <div className={`rounded-lg border ${urgencyColor} p-2.5`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs text-muted-foreground shrink-0">{index}.</span>
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground truncate">{exercise.name}</div>
+            <div className="text-[10px] text-muted-foreground">
+              {exercise.sets > 1 ? `${exercise.sets}× ` : ""}{durationLabel} por lado · {exercise.isActive ? "Activo" : "Estático"}
+            </div>
+          </div>
+        </div>
+        <button onClick={() => setExpanded(!expanded)}
+          className="text-muted-foreground hover:text-foreground shrink-0">
+          {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="mt-2 pt-2 border-t border-border/30 space-y-1.5">
+          <p className="text-xs text-foreground/85 leading-relaxed">{exercise.instructions}</p>
+          <p className="text-[11px] italic text-primary/80">💡 {exercise.cue}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sub-componentes ───────────────────────────────────────────────────────────
+
+function Field({ label, value, onChange, placeholder }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
+}) {
   return (
     <div className="space-y-1">
       <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</Label>
@@ -304,6 +411,8 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
 
 function Pill({ k, v }: { k: string; v: string }) {
   return (
-    <span className="text-xs text-foreground"><span className="opacity-60">{k}:</span> <strong>{v}</strong></span>
+    <span className="text-xs text-foreground">
+      <span className="opacity-60">{k}:</span> <strong>{v}</strong>
+    </span>
   );
 }
