@@ -6,13 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Clock, Flame, ChevronDown, ChevronUp, Search, Filter } from "lucide-react";
+import { Clock, Flame, ChevronDown, ChevronUp, Search } from "lucide-react";
 import { format } from "date-fns";
 import {
   getMobilitySuggestions,
   getRecoveryRoutine,
-  getWarmupRoutine,
-  getCooldownRoutine,
   totalRoutineMinutes,
   STRETCHING_LIBRARY,
   type MobilitySuggestion,
@@ -136,7 +134,6 @@ export default function MobilityPage() {
     },
   }[mobilityContext];
 
-  // Filtrar biblioteca
   const filteredLibrary = STRETCHING_LIBRARY.filter(ex => {
     const matchSearch = !search || ex.name.toLowerCase().includes(search.toLowerCase()) ||
       ex.zones.some(z => ZONE_LABELS[z].toLowerCase().includes(search.toLowerCase()));
@@ -168,35 +165,35 @@ export default function MobilityPage() {
         <TabsContent value="program" className="space-y-4 mt-4">
 
           {/* Contexto */}
-          <div className="rounded-xl border border-border/50 bg-card p-4 flex items-start justify-between gap-3 flex-wrap">
+          <Card className="p-4 flex items-start justify-between gap-3 flex-wrap">
             <div className="space-y-0.5">
-              <div className="font-medium text-foreground">{contextInfo.label}</div>
+              <div className="font-semibold text-foreground">{contextInfo.label}</div>
               <div className="text-sm text-muted-foreground">{contextInfo.desc}</div>
             </div>
-            <div className="flex items-center gap-4 text-sm text-muted-foreground shrink-0">
+            <div className="flex items-center gap-4 text-sm text-muted-foreground shrink-0 flex-wrap">
               <span className="flex items-center gap-1.5">
                 <Clock className="w-4 h-4" />
                 ~{totalMin} min
               </span>
               <span>{mobilitySuggestions.length} exercícios</span>
               {hasHighUrgency && (
-                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
+                <Badge className="bg-amber-500/20 text-amber-500 border-amber-500/30 text-xs">
                   Prioritário
                 </Badge>
               )}
             </div>
-          </div>
+          </Card>
 
           {/* Dor reportada */}
           {sorenessZones && sorenessZones.length > 0 && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 flex items-start gap-3">
-              <Flame className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="space-y-0.5">
-                <span className="text-sm font-medium text-amber-400">Tensão/dor reportada: </span>
-                <span className="text-sm text-amber-200/80">{sorenessZones.join(", ")}</span>
-                <div className="text-xs text-amber-200/60 mt-1">Os exercícios abaixo priorizam estas zonas musculares.</div>
+            <Card className="p-3 border-amber-500/40 flex items-start gap-3">
+              <Flame className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <span className="text-sm font-medium text-amber-500">Tensão/dor reportada: </span>
+                <span className="text-sm text-foreground">{sorenessZones.join(", ")}</span>
+                <div className="text-xs text-muted-foreground mt-1">Os exercícios abaixo priorizam estas zonas musculares.</div>
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Exercícios */}
@@ -207,19 +204,17 @@ export default function MobilityPage() {
           </div>
 
           {!sorenessZones?.length && mobilityContext === "general" && (
-            <div className="rounded-xl border border-border/40 bg-muted/20 p-4 text-center space-y-1">
+            <Card className="p-4 text-center space-y-1">
               <div className="text-sm font-medium text-foreground">Personaliza o programa</div>
               <p className="text-xs text-muted-foreground">
                 Regista a biometria diária com as zonas de dor para receber sugestões específicas.
               </p>
-            </div>
+            </Card>
           )}
         </TabsContent>
 
         {/* ── Biblioteca ── */}
         <TabsContent value="library" className="space-y-4 mt-4">
-
-          {/* Filtros */}
           <div className="space-y-3">
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -228,23 +223,21 @@ export default function MobilityPage() {
             </div>
 
             <div className="flex gap-2 flex-wrap">
-              <Button size="sm" variant={timingFilter === "all" ? "default" : "outline"}
-                onClick={() => setTimingFilter("all")}>Todos</Button>
-              {(["before", "after", "anytime"] as StretchTiming[]).map(t => (
+              {(["all", "before", "after", "anytime"] as const).map(t => (
                 <Button key={t} size="sm" variant={timingFilter === t ? "default" : "outline"}
                   onClick={() => setTimingFilter(t)}>
-                  {TIMING_LABELS[t]}
+                  {t === "all" ? "Todos" : TIMING_LABELS[t]}
                 </Button>
               ))}
             </div>
 
             <div className="flex gap-2 flex-wrap">
-              <Button size="sm" variant={typeFilter === "all" ? "default" : "outline"}
-                onClick={() => setTypeFilter("all")}>Activo + Estático</Button>
-              <Button size="sm" variant={typeFilter === "active" ? "default" : "outline"}
-                onClick={() => setTypeFilter("active")}>Só activos</Button>
-              <Button size="sm" variant={typeFilter === "static" ? "default" : "outline"}
-                onClick={() => setTypeFilter("static")}>Só estáticos</Button>
+              {(["all", "active", "static"] as const).map(t => (
+                <Button key={t} size="sm" variant={typeFilter === t ? "default" : "outline"}
+                  onClick={() => setTypeFilter(t)}>
+                  {t === "all" ? "Activo + Estático" : t === "active" ? "Só activos" : "Só estáticos"}
+                </Button>
+              ))}
             </div>
 
             <div className="flex gap-2 flex-wrap">
@@ -261,9 +254,8 @@ export default function MobilityPage() {
 
           <div className="text-xs text-muted-foreground">{filteredLibrary.length} exercícios</div>
 
-          {/* Lista */}
           <div className="space-y-3">
-            {filteredLibrary.map((ex, i) => (
+            {filteredLibrary.map((ex) => (
               <LibraryCard key={ex.id} exercise={ex} />
             ))}
             {filteredLibrary.length === 0 && (
@@ -278,17 +270,25 @@ export default function MobilityPage() {
   );
 }
 
-// ── Card de exercício do programa ─────────────────────────────────────────────
+// ── Card exercício programa ───────────────────────────────────────────────────
 
 function MobilityCard({ suggestion, index }: { suggestion: MobilitySuggestion; index: number }) {
   const { exercise, reason, urgency } = suggestion;
   const [expanded, setExpanded] = useState(false);
 
-  const styles = {
-    high: { border: "border-amber-500/40", bg: "bg-amber-500/8", badge: "bg-amber-500/20 text-amber-400 border-amber-500/30", label: "Prioritário" },
-    medium: { border: "border-primary/30", bg: "bg-primary/5", badge: "bg-primary/20 text-primary border-primary/30", label: "Recomendado" },
-    low: { border: "border-border/50", bg: "bg-card", badge: "bg-muted/60 text-muted-foreground border-border/60", label: "Geral" },
-  }[urgency];
+  const leftBorder = urgency === "high"
+    ? "border-l-4 border-l-amber-500"
+    : urgency === "medium"
+    ? "border-l-4 border-l-primary"
+    : "";
+
+  const badgeStyle = urgency === "high"
+    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+    : urgency === "medium"
+    ? "bg-primary/15 text-primary border-primary/30"
+    : "bg-muted text-muted-foreground border-border";
+
+  const badgeLabel = urgency === "high" ? "Prioritário" : urgency === "medium" ? "Recomendado" : "Geral";
 
   const durationLabel = exercise.duration_sec >= 60
     ? `${Math.round(exercise.duration_sec / 60)} min`
@@ -298,7 +298,7 @@ function MobilityCard({ suggestion, index }: { suggestion: MobilitySuggestion; i
     : `${durationLabel} por lado`;
 
   return (
-    <div className={`rounded-xl border ${styles.border} ${styles.bg} overflow-hidden`}>
+    <Card className={`overflow-hidden ${leftBorder}`}>
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -307,40 +307,40 @@ function MobilityCard({ suggestion, index }: { suggestion: MobilitySuggestion; i
               <div className="font-semibold text-foreground">{exercise.name}</div>
               <div className="text-sm text-muted-foreground mt-0.5">{reason}</div>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
-                <Badge variant="outline" className={`text-[10px] ${styles.badge}`}>{styles.label}</Badge>
+                <Badge variant="outline" className={`text-[10px] ${badgeStyle}`}>{badgeLabel}</Badge>
                 <span className="text-xs text-muted-foreground">{setsLabel}</span>
-                <Badge variant="outline" className="text-[10px] text-muted-foreground border-border/50">
+                <Badge variant="outline" className="text-[10px]">
                   {exercise.isActive ? "⚡ Activo" : "🧘 Estático"}
                 </Badge>
                 {exercise.zones.slice(0, 2).map(z => (
-                  <Badge key={z} variant="outline" className="text-[10px] text-muted-foreground border-border/40">
-                    {ZONE_LABELS[z]}
-                  </Badge>
+                  <Badge key={z} variant="secondary" className="text-[10px]">{ZONE_LABELS[z]}</Badge>
                 ))}
               </div>
             </div>
           </div>
-          <button onClick={() => setExpanded(!expanded)}
-            className="shrink-0 p-1.5 rounded-lg hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="shrink-0 p-1.5 rounded-lg hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
+          >
             {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
         </div>
 
         {expanded && (
           <div className="mt-4 pt-4 border-t border-border/40 space-y-3">
-            <p className="text-sm text-foreground/90 leading-relaxed">{exercise.instructions}</p>
+            <p className="text-sm text-foreground leading-relaxed">{exercise.instructions}</p>
             <div className="rounded-lg bg-primary/10 border border-primary/20 px-3 py-2 flex items-start gap-2">
               <span className="text-primary text-sm shrink-0">💡</span>
-              <p className="text-sm text-primary/90 italic leading-relaxed">{exercise.cue}</p>
+              <p className="text-sm text-primary italic leading-relaxed">{exercise.cue}</p>
             </div>
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
-// ── Card da biblioteca ─────────────────────────────────────────────────────────
+// ── Card biblioteca ───────────────────────────────────────────────────────────
 
 function LibraryCard({ exercise }: { exercise: StretchExercise }) {
   const [expanded, setExpanded] = useState(false);
@@ -353,7 +353,7 @@ function LibraryCard({ exercise }: { exercise: StretchExercise }) {
     : `${durationLabel} por lado`;
 
   return (
-    <div className="rounded-xl border border-border/50 bg-card overflow-hidden">
+    <Card className="overflow-hidden">
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
@@ -367,7 +367,6 @@ function LibraryCard({ exercise }: { exercise: StretchExercise }) {
               <span className="text-xs text-muted-foreground flex items-center gap-1">
                 <Clock className="w-3 h-3" /> {setsLabel}
               </span>
-              <span className="text-muted-foreground text-xs">·</span>
               {exercise.timing.map(t => (
                 <Badge key={t} variant="outline" className="text-[10px] text-muted-foreground border-border/40">
                   {TIMING_LABELS[t]}
@@ -380,22 +379,24 @@ function LibraryCard({ exercise }: { exercise: StretchExercise }) {
               ))}
             </div>
           </div>
-          <button onClick={() => setExpanded(!expanded)}
-            className="shrink-0 p-1.5 rounded-lg hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="shrink-0 p-1.5 rounded-lg hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
+          >
             {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
         </div>
 
         {expanded && (
           <div className="mt-4 pt-4 border-t border-border/40 space-y-3">
-            <p className="text-sm text-foreground/90 leading-relaxed">{exercise.instructions}</p>
+            <p className="text-sm text-foreground leading-relaxed">{exercise.instructions}</p>
             <div className="rounded-lg bg-primary/10 border border-primary/20 px-3 py-2 flex items-start gap-2">
               <span className="text-primary text-sm shrink-0">💡</span>
-              <p className="text-sm text-primary/90 italic leading-relaxed">{exercise.cue}</p>
+              <p className="text-sm text-primary italic leading-relaxed">{exercise.cue}</p>
             </div>
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
