@@ -321,7 +321,7 @@ export default function RacesPage() {
                         <Badge className={PRIORITY_COLORS[r.priority]} variant="outline">{t("races.badge.priority", { p: r.priority })}</Badge>
                       )}
                       {r.is_atrp && <Badge variant="outline" className="text-[10px] bg-orange-500/10 text-orange-500 border-orange-500/30">ATRP</Badge>}
-                      <h3 className="font-semibold text-lg truncate">{r.name}</h3>
+                      <h3 className="font-semibold text-lg truncate text-foreground">{r.name}</h3>
                     </div>
                     <div className="text-sm text-muted-foreground mt-1">
                       {format(date, "dd/MM/yyyy")}
