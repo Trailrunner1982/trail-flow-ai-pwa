@@ -236,7 +236,7 @@ export function DailyCoachCard({ todayWorkout, todayBio, readiness, onApplied }:
             </div>
           )}
 
-          <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-3">
+          <div className="rounded-lg border border-border/60 bg-card p-3 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
                 {editing ? "Edita os valores antes de guardar" : "Versão sugerida para hoje"}
@@ -304,6 +304,6 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
 
 function Pill({ k, v }: { k: string; v: string }) {
   return (
-    <span className="text-xs"><span className="text-muted-foreground">{k}:</span> <strong className="text-foreground">{v}</strong></span>
+    <span className="text-xs text-foreground"><span className="opacity-60">{k}:</span> <strong>{v}</strong></span>
   );
 }
