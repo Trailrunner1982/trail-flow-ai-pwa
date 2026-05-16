@@ -13,7 +13,8 @@ import { calculateBMI, calculateMetabolicAge, calculateZones } from "@/lib/train
 import { fmtPace } from "@/lib/format";
 import {
   User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown,
-  HelpCircle, Settings2, Activity, Mountain, HeartPulse, Users, Send, CheckCircle2,
+  HelpCircle, Settings2, Activity, Mountain, HeartPulse, Users, Send,
+  CheckCircle2, CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 import { differenceInYears, format, subDays } from "date-fns";
@@ -40,6 +41,7 @@ interface Profile {
   itra_id: string | null;
   itra_performance_index: number | null;
   itra_profile_url: string | null;
+  subscription_end_date: string | null;
 }
 
 interface WeightEntry {
@@ -123,6 +125,7 @@ export default function ProfilePage() {
     available_run_days: [1,2,3,4,5,6], available_strength_days: [2,4], long_run_day: 6,
     avatar_url: null, strava_athlete_id: null,
     atrp_number: null, itra_id: null, itra_performance_index: null, itra_profile_url: null,
+    subscription_end_date: null,
   });
 
   const DAYS = [
@@ -150,6 +153,7 @@ export default function ProfilePage() {
         itra_id: (data as any).itra_id ?? null,
         itra_performance_index: (data as any).itra_performance_index ?? null,
         itra_profile_url: (data as any).itra_profile_url ?? null,
+        subscription_end_date: (data as any).subscription_end_date ?? null,
       });
       setPaceInput(secToPaceInput(data.baseline_avg_pace_sec_per_km));
       if ((data as any).strava_athlete_id) setStravaConnected(true);
@@ -162,11 +166,8 @@ export default function ProfilePage() {
       .not("weight_kg", "is", null).order("measurement_date", { ascending: true });
     setWeightHistory((wData ?? []).map((r: any) => ({ id: r.id, date: r.measurement_date, weight_kg: r.weight_kg })));
 
-    // Carregar referrals do atleta
     const { data: refs } = await supabase
-      .from("referrals")
-      .select("*")
-      .eq("referrer_id", userId)
+      .from("referrals").select("*").eq("referrer_id", userId)
       .order("created_at", { ascending: false });
     setReferrals((refs ?? []) as Referral[]);
 
@@ -214,8 +215,8 @@ export default function ProfilePage() {
     const bmi = currentWeight && form.height_cm ? calculateBMI(currentWeight, form.height_cm) : null;
     const age = form.date_of_birth ? differenceInYears(new Date(), new Date(form.date_of_birth)) : null;
     const metabolic_age = age != null ? calculateMetabolicAge(age, form.vo2_max, bmi) : null;
-    const { strava_athlete_id, ...formWithoutStrava } = form;
-    const { error } = await supabase.from("profiles").update({ ...formWithoutStrava, metabolic_age }).eq("id", userId);
+    const { strava_athlete_id, subscription_end_date, ...formWithoutReadOnly } = form;
+    const { error } = await supabase.from("profiles").update({ ...formWithoutReadOnly, metabolic_age }).eq("id", userId);
     if (form.max_hr && form.resting_hr && form.baseline_avg_pace_sec_per_km) {
       const z = calculateZones(form.max_hr, form.resting_hr, form.baseline_avg_pace_sec_per_km);
       await supabase.from("training_zones").upsert({
@@ -290,19 +291,16 @@ export default function ProfilePage() {
     load();
   };
 
-  // ── Enviar convite ────────────────────────────────────────────────────────
   const handleSendInvite = async () => {
     if (!inviteEmail.includes("@")) return toast.error("Email inválido");
     if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
     setSendingInvite(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-const { data, error } = await supabase.functions.invoke("send-referral", {
-  body: { invited_email: inviteEmail.trim().toLowerCase() },
-  headers: {
-    Authorization: `Bearer ${session?.access_token}`,
-  },
-});
+      const { data, error } = await supabase.functions.invoke("send-referral", {
+        body: { invited_email: inviteEmail.trim().toLowerCase() },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
       toast.success(`Convite enviado para ${inviteEmail}! 🎉`);
@@ -339,10 +337,15 @@ const { data, error } = await supabase.functions.invoke("send-referral", {
   const acceptedInvites = referrals.filter(r => r.status === "accepted");
   const rewardsEarned = acceptedInvites.filter(r => r.reward_referrer_applied).length * 2;
 
+  // Subscrição
+  const subEnd = form.subscription_end_date ? new Date(form.subscription_end_date) : null;
+  const subActive = subEnd && subEnd > new Date();
+  const daysLeft = subEnd ? Math.max(0, Math.ceil((subEnd.getTime() - Date.now()) / 86400000)) : 0;
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
+        <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2 text-foreground">
           <User className="w-6 h-6 text-primary" /> {t("profile.title")}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">{t("profile.subtitle")}</p>
@@ -358,7 +361,6 @@ const { data, error } = await supabase.functions.invoke("send-referral", {
           </TabsTrigger>
         </TabsList>
 
-        {/* ── Tab Perfil ── */}
         <TabsContent value="profile" className="mt-4 space-y-6">
 
           {/* Foto + info */}
@@ -390,6 +392,39 @@ const { data, error } = await supabase.functions.invoke("send-referral", {
                 <Settings2 className="w-4 h-4" /> Editar perfil
               </Button>
             </div>
+          </Card>
+
+          {/* ── Subscrição ── */}
+          <Card className="p-4 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${subActive ? "bg-emerald-500" : "bg-destructive"}`} />
+              <div>
+                <div className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-primary" />
+                  {subActive ? "Subscrição activa" : subEnd ? "Subscrição expirada" : "Sem subscrição"}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {subEnd
+                    ? `Válida até ${subEnd.toLocaleDateString("pt-PT")}${subActive ? ` · ${daysLeft} dias restantes` : ""}`
+                    : "Contacta o teu treinador para activar"}
+                </div>
+                {rewardsEarned > 0 && (
+                  <div className="text-xs text-primary mt-0.5">
+                    🏆 {rewardsEarned} {rewardsEarned === 1 ? "mês ganho" : "meses ganhos"} por convites aceites
+                  </div>
+                )}
+              </div>
+            </div>
+            {subActive && (
+              <Badge className="bg-emerald-500/15 text-emerald-500 border-emerald-500/30 text-xs">
+                Activa
+              </Badge>
+            )}
+            {!subActive && subEnd && (
+              <Badge variant="outline" className="text-destructive border-destructive/40 text-xs">
+                Expirou
+              </Badge>
+            )}
           </Card>
 
           {/* Métricas calculadas */}
@@ -662,7 +697,7 @@ const { data, error } = await supabase.functions.invoke("send-referral", {
             )}
           </Card>
 
-          {/* ── Convidar atletas ── */}
+          {/* Convidar atletas */}
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground">
@@ -680,7 +715,6 @@ const { data, error } = await supabase.functions.invoke("send-referral", {
               </div>
             </div>
 
-            {/* Banner benefícios */}
             <div className="rounded-xl bg-primary/10 border border-primary/20 p-3 space-y-1.5">
               <div className="text-sm font-medium text-foreground">Como funciona</div>
               <div className="text-xs text-muted-foreground space-y-0.5">
@@ -690,35 +724,24 @@ const { data, error } = await supabase.functions.invoke("send-referral", {
               </div>
             </div>
 
-            {/* Campo de convite */}
             {pendingInvites.length < 3 ? (
               <div className="flex gap-2">
-                <Input
-                  type="email"
-                  placeholder="email@exemplo.com"
-                  value={inviteEmail}
+                <Input type="email" placeholder="email@exemplo.com" value={inviteEmail}
                   onChange={e => setInviteEmail(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter") handleSendInvite(); }}
-                  className="flex-1"
-                />
-                <Button
-                  size="sm"
-                  onClick={handleSendInvite}
-                  disabled={sendingInvite || !inviteEmail.includes("@")}
-                >
-                  {sendingInvite
-                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                    : <Send className="w-4 h-4" />}
+                  className="flex-1" />
+                <Button size="sm" onClick={handleSendInvite}
+                  disabled={sendingInvite || !inviteEmail.includes("@")}>
+                  {sendingInvite ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   Convidar
                 </Button>
               </div>
             ) : (
               <p className="text-xs text-amber-500">
-                ⚠️ Tens 3 convites activos. Aguarda que sejam aceites para convidar mais atletas.
+                ⚠️ Tens 3 convites activos. Aguarda que sejam aceites para convidar mais.
               </p>
             )}
 
-            {/* Lista de convites */}
             {referrals.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Os teus convites</div>
@@ -762,10 +785,12 @@ const { data, error } = await supabase.functions.invoke("send-referral", {
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label={t("profile.newPwd")}>
-                <Input type="password" autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder={t("profile.pwdHint")} />
+                <Input type="password" autoComplete="new-password" value={pwd}
+                  onChange={(e) => setPwd(e.target.value)} placeholder={t("profile.pwdHint")} />
               </Field>
               <Field label={t("profile.confirmPwd")}>
-                <Input type="password" autoComplete="new-password" value={pwd2} onChange={(e) => setPwd2(e.target.value)} />
+                <Input type="password" autoComplete="new-password" value={pwd2}
+                  onChange={(e) => setPwd2(e.target.value)} />
               </Field>
             </div>
             <ul className="text-xs space-y-1">
@@ -806,7 +831,6 @@ const { data, error } = await supabase.functions.invoke("send-referral", {
           )}
         </TabsContent>
 
-        {/* Tab Biometria */}
         <TabsContent value="biometrics" className="mt-4">
           <BiometricsPage />
         </TabsContent>
