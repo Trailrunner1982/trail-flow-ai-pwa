@@ -15,11 +15,16 @@ Deno.serve(async (req) => {
     if (!email || !email.includes("@")) throw new Error("Email inválido");
     if (!password || password.length < 8) throw new Error("Password deve ter pelo menos 8 caracteres");
 
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SERVICE_ROLE_KEY") ?? "",
-      { auth: { autoRefreshToken: false, persistSession: false } },
-    );
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+    const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY") ?? "";
+    const SUPABASE_ANON_KEY = Deno.env.get("ANON_KEY") ?? "";
+
+    // Cliente admin para operações de base de dados
+    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    console.log("Validating token:", token);
 
     // Validar token
     const { data: referral, error: refErr } = await supabaseAdmin
@@ -45,24 +50,36 @@ Deno.serve(async (req) => {
       throw new Error("Este convite foi enviado para outro email");
     }
 
+    console.log("Token valid, creating user with signUp...");
+
+    // Usar signUp em vez de admin.createUser — não requer permissões admin
+    // Cliente com anon key para o signUp
+    const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { data: signUpData, error: signUpErr } = await supabaseAnon.auth.signUp({
+      email: email.toLowerCase(),
+      password,
+      options: {
+        data: { full_name: full_name ?? null },
+      },
+    });
+
+    if (signUpErr) {
+      console.error("signUp error:", signUpErr.message);
+      if (signUpErr.message.includes("already")) throw new Error("Este email já tem uma conta no Trail Forge");
+      throw new Error("Erro ao criar conta: " + signUpErr.message);
+    }
+
+    const inviteeId = signUpData.user?.id;
+    if (!inviteeId) throw new Error("Erro ao criar utilizador — tenta novamente");
+
+    console.log("User created:", inviteeId);
+
     // Calcular data de subscrição do convidado (+1 mês grátis)
     const inviteeSubEnd = new Date();
     inviteeSubEnd.setMonth(inviteeSubEnd.getMonth() + 1);
-
-    // Criar conta do convidado
-    const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-      email: email.toLowerCase(),
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: full_name ?? null },
-    });
-
-    if (createErr) {
-      if (createErr.message.includes("already")) throw new Error("Este email já tem uma conta no Trail Forge");
-      throw createErr;
-    }
-
-    const inviteeId = newUser.user.id;
 
     // Actualizar perfil do convidado com 1 mês grátis
     await supabaseAdmin.from("profiles").upsert({
@@ -72,6 +89,8 @@ Deno.serve(async (req) => {
       must_change_password: false,
       onboarding_completed: false,
     });
+
+    console.log("Profile updated with 1 month free");
 
     // Marcar referral como aceite
     await supabaseAdmin.from("referrals").update({
@@ -84,12 +103,11 @@ Deno.serve(async (req) => {
     // Aplicar +2 meses ao referrer
     const { data: referrerProfile } = await supabaseAdmin
       .from("profiles")
-      .select("subscription_end_date, full_name")
+      .select("subscription_end_date")
       .eq("id", referral.referrer_id)
       .single();
 
     if (referrerProfile) {
-      // Calcula nova data: estende a subscrição actual ou a partir de hoje
       const currentEnd = referrerProfile.subscription_end_date
         ? new Date(referrerProfile.subscription_end_date)
         : new Date();
@@ -100,15 +118,12 @@ Deno.serve(async (req) => {
         subscription_end_date: referenceDate.toISOString(),
       }).eq("id", referral.referrer_id);
 
-      // Marcar recompensa do referrer como aplicada
       await supabaseAdmin.from("referrals").update({
         reward_referrer_applied: true,
       }).eq("id", referral.id);
 
-      console.log(`Referrer ${referral.referrer_id} got +2 months. New end: ${referenceDate.toISOString()}`);
+      console.log("Referrer got +2 months:", referral.referrer_id);
     }
-
-    console.log(`Referral accepted: invitee ${inviteeId}, referrer ${referral.referrer_id}`);
 
     return new Response(JSON.stringify({
       success: true,
@@ -119,7 +134,7 @@ Deno.serve(async (req) => {
     });
 
   } catch (e: any) {
-    console.error("accept-referral error:", e);
+    console.error("accept-referral error:", e.message);
     return new Response(JSON.stringify({ error: e.message }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
