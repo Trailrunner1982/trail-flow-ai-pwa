@@ -11,7 +11,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { calculateBMI, calculateMetabolicAge, calculateZones } from "@/lib/training";
 import { fmtPace } from "@/lib/format";
-import { User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown, HelpCircle, Settings2, Activity, Mountain, HeartPulse } from "lucide-react";
+import {
+  User, Heart, Save, Loader2, Camera, KeyRound, Weight, TrendingDown,
+  HelpCircle, Settings2, Activity, Mountain, HeartPulse, Users, Send, CheckCircle2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { differenceInYears, format, subDays } from "date-fns";
 import { useLanguage } from "@/lib/i18n";
@@ -43,6 +46,15 @@ interface WeightEntry {
   id: string;
   date: string;
   weight_kg: number;
+}
+
+interface Referral {
+  id: string;
+  invited_email: string;
+  status: "pending" | "accepted" | "expired";
+  created_at: string;
+  accepted_at: string | null;
+  reward_referrer_applied: boolean;
 }
 
 function Tooltip2({ text }: { text: string }) {
@@ -98,6 +110,12 @@ export default function ProfilePage() {
   const [stravaImporting, setStravaImporting] = useState(false);
   const [mainTab, setMainTab] = useState("profile");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Referrals
+  const [referrals, setReferrals] = useState<Referral[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [sendingInvite, setSendingInvite] = useState(false);
+
   const [form, setForm] = useState<Profile>({
     full_name: "", date_of_birth: null, weight_kg: null, height_cm: null,
     max_hr: null, resting_hr: null, vo2_max: null,
@@ -136,12 +154,22 @@ export default function ProfilePage() {
       setPaceInput(secToPaceInput(data.baseline_avg_pace_sec_per_km));
       if ((data as any).strava_athlete_id) setStravaConnected(true);
     }
+
     const since = format(subDays(new Date(), 90), "yyyy-MM-dd");
     const { data: wData } = await supabase
       .from("daily_biometrics").select("id, measurement_date, weight_kg")
       .eq("user_id", userId).gte("measurement_date", since)
       .not("weight_kg", "is", null).order("measurement_date", { ascending: true });
     setWeightHistory((wData ?? []).map((r: any) => ({ id: r.id, date: r.measurement_date, weight_kg: r.weight_kg })));
+
+    // Carregar referrals do atleta
+    const { data: refs } = await supabase
+      .from("referrals")
+      .select("*")
+      .eq("referrer_id", userId)
+      .order("created_at", { ascending: false });
+    setReferrals((refs ?? []) as Referral[]);
+
     setLoading(false);
   }, [userId]);
 
@@ -262,6 +290,27 @@ export default function ProfilePage() {
     load();
   };
 
+  // ── Enviar convite ────────────────────────────────────────────────────────
+  const handleSendInvite = async () => {
+    if (!inviteEmail.includes("@")) return toast.error("Email inválido");
+    if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
+    setSendingInvite(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("send-referral", {
+        body: { invited_email: inviteEmail.trim().toLowerCase() },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast.success(`Convite enviado para ${inviteEmail}! 🎉`);
+      setInviteEmail("");
+      load();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Erro ao enviar convite");
+    } finally {
+      setSendingInvite(false);
+    }
+  };
+
   if (loading) return <LoadingScreen />;
 
   const currentWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight_kg : form.weight_kg;
@@ -282,6 +331,10 @@ export default function ProfilePage() {
   const weightDelta = firstWeight && lastWeight && firstWeight !== lastWeight ? (lastWeight - firstWeight).toFixed(1) : null;
   const trainingConfigured = !!(form.baseline_km_per_week && form.baseline_avg_pace_sec_per_km && form.available_run_days?.length);
 
+  const pendingInvites = referrals.filter(r => r.status === "pending");
+  const acceptedInvites = referrals.filter(r => r.status === "accepted");
+  const rewardsEarned = acceptedInvites.filter(r => r.reward_referrer_applied).length * 2;
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
@@ -301,7 +354,7 @@ export default function ProfilePage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Tab Perfil */}
+        {/* ── Tab Perfil ── */}
         <TabsContent value="profile" className="mt-4 space-y-6">
 
           {/* Foto + info */}
@@ -311,7 +364,7 @@ export default function ProfilePage() {
               <AvatarFallback>{initials}</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-[180px]">
-              <div className="font-semibold text-lg">{form.full_name || t("profile.noName")}</div>
+              <div className="font-semibold text-lg text-foreground">{form.full_name || t("profile.noName")}</div>
               {age && <div className="text-sm text-muted-foreground">{age} anos</div>}
               {currentWeight && <div className="text-sm text-muted-foreground">{currentWeight} kg · {form.height_cm} cm</div>}
               {form.itra_performance_index && (
@@ -349,7 +402,7 @@ export default function ProfilePage() {
           {/* Form de perfil */}
           {editingProfile && (
             <Card className="p-5 space-y-5">
-              <h3 className="text-sm font-semibold">Dados pessoais</h3>
+              <h3 className="text-sm font-semibold text-foreground">Dados pessoais</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label={t("auth.fullName")}>
                   <Input value={form.full_name ?? ""} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
@@ -386,9 +439,9 @@ export default function ProfilePage() {
           {/* Strava */}
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground">
                 <Activity className="w-4 h-4 text-orange-500" /> Strava
-                <Tooltip2 text="Liga o teu Strava para importar automaticamente as tuas atividades. Funciona com Garmin, Coros, Suunto e Polar." />
+                <Tooltip2 text="Liga o teu Strava para importar automaticamente as tuas atividades." />
               </h3>
               {stravaConnected && <Badge className="bg-orange-500/15 text-orange-500 border-orange-500/30">✓ Ligado</Badge>}
             </div>
@@ -409,7 +462,7 @@ export default function ProfilePage() {
           {/* ITRA / ATRP */}
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground">
                 <Mountain className="w-4 h-4 text-primary" /> ITRA & ATRP
                 <Tooltip2 text="Performance Index ITRA e número de associado ATRP." />
               </h3>
@@ -421,22 +474,22 @@ export default function ProfilePage() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 <div className="bg-muted/40 rounded-lg p-3">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">ITRA Performance Index</div>
-                  <div className="font-semibold mt-1">{form.itra_performance_index ?? "—"}</div>
+                  <div className="font-semibold mt-1 text-foreground">{form.itra_performance_index ?? "—"}</div>
                 </div>
                 <div className="bg-muted/40 rounded-lg p-3">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">ITRA ID</div>
-                  <div className="font-semibold mt-1 truncate">{form.itra_id ?? "—"}</div>
+                  <div className="font-semibold mt-1 truncate text-foreground">{form.itra_id ?? "—"}</div>
                 </div>
                 <div className="bg-muted/40 rounded-lg p-3">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Nº Associado ATRP</div>
-                  <div className="font-semibold mt-1">{form.atrp_number ?? "—"}</div>
+                  <div className="font-semibold mt-1 text-foreground">{form.atrp_number ?? "—"}</div>
                 </div>
                 <div className="bg-muted/40 rounded-lg p-3">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Perfil ITRA</div>
                   {form.itra_profile_url ? (
                     <a href={form.itra_profile_url} target="_blank" rel="noreferrer" className="text-primary text-xs underline mt-1 block">Ver perfil →</a>
                   ) : (
-                    <div className="font-semibold mt-1">—</div>
+                    <div className="font-semibold mt-1 text-foreground">—</div>
                   )}
                 </div>
               </div>
@@ -477,7 +530,7 @@ export default function ProfilePage() {
           {/* Peso */}
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground">
                 <Weight className="w-4 h-4 text-primary" /> Evolução do peso
                 <Tooltip2 text="Regista o teu peso diariamente para acompanhar a evolução nos últimos 90 dias." />
               </h3>
@@ -510,7 +563,7 @@ export default function ProfilePage() {
           {/* Configuração de treino */}
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground">
                 <Settings2 className="w-4 h-4 text-primary" /> Configuração de treino
                 <Tooltip2 text="Define as tuas preferências de treino. O coach AI usa estes dados para gerar os teus planos." />
               </h3>
@@ -525,15 +578,15 @@ export default function ProfilePage() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
                 <div className="bg-muted/40 rounded-lg p-3">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Pace base</div>
-                  <div className="font-semibold mt-1">{fmtPace(form.baseline_avg_pace_sec_per_km!)} min/km</div>
+                  <div className="font-semibold mt-1 text-foreground">{fmtPace(form.baseline_avg_pace_sec_per_km!)} min/km</div>
                 </div>
                 <div className="bg-muted/40 rounded-lg p-3">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Km semanais</div>
-                  <div className="font-semibold mt-1">{form.baseline_km_per_week} km</div>
+                  <div className="font-semibold mt-1 text-foreground">{form.baseline_km_per_week} km</div>
                 </div>
                 <div className="bg-muted/40 rounded-lg p-3">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Dias de corrida</div>
-                  <div className="font-semibold mt-1">{form.available_run_days?.length} dias/semana</div>
+                  <div className="font-semibold mt-1 text-foreground">{form.available_run_days?.length} dias/semana</div>
                 </div>
               </div>
             )}
@@ -605,9 +658,102 @@ export default function ProfilePage() {
             )}
           </Card>
 
+          {/* ── Convidar atletas ── */}
+          <Card className="p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                <Users className="w-4 h-4 text-primary" /> Convidar atletas
+              </h3>
+              <div className="flex items-center gap-2">
+                {rewardsEarned > 0 && (
+                  <Badge className="bg-emerald-500/15 text-emerald-500 border-emerald-500/30 text-xs">
+                    +{rewardsEarned} meses ganhos
+                  </Badge>
+                )}
+                <Badge variant="outline" className="text-xs">
+                  {pendingInvites.length}/3 activos
+                </Badge>
+              </div>
+            </div>
+
+            {/* Banner benefícios */}
+            <div className="rounded-xl bg-primary/10 border border-primary/20 p-3 space-y-1.5">
+              <div className="text-sm font-medium text-foreground">Como funciona</div>
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <div>🎁 O teu convidado recebe <strong className="text-foreground">1 mês grátis</strong> ao activar a conta</div>
+                <div>🏆 Tu recebes <strong className="text-foreground">2 meses grátis</strong> quando ele entrar</div>
+                <div>📧 Máximo 3 convites activos em simultâneo</div>
+              </div>
+            </div>
+
+            {/* Campo de convite */}
+            {pendingInvites.length < 3 ? (
+              <div className="flex gap-2">
+                <Input
+                  type="email"
+                  placeholder="email@exemplo.com"
+                  value={inviteEmail}
+                  onChange={e => setInviteEmail(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") handleSendInvite(); }}
+                  className="flex-1"
+                />
+                <Button
+                  size="sm"
+                  onClick={handleSendInvite}
+                  disabled={sendingInvite || !inviteEmail.includes("@")}
+                >
+                  {sendingInvite
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <Send className="w-4 h-4" />}
+                  Convidar
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-amber-500">
+                ⚠️ Tens 3 convites activos. Aguarda que sejam aceites para convidar mais atletas.
+              </p>
+            )}
+
+            {/* Lista de convites */}
+            {referrals.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Os teus convites</div>
+                {referrals.map(r => (
+                  <div key={r.id} className="flex items-center justify-between gap-2 bg-muted/30 rounded-lg px-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-foreground truncate">{r.invited_email}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        Enviado {new Date(r.created_at).toLocaleDateString("pt-PT")}
+                        {r.accepted_at && ` · Aceite ${new Date(r.accepted_at).toLocaleDateString("pt-PT")}`}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {r.status === "accepted" ? (
+                        <>
+                          <Badge className="bg-emerald-500/15 text-emerald-500 border-emerald-500/30 text-[10px]">
+                            <CheckCircle2 className="w-3 h-3 mr-1" /> Aceite
+                          </Badge>
+                          {r.reward_referrer_applied && (
+                            <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                              +2 meses ✓
+                            </Badge>
+                          )}
+                        </>
+                      ) : r.status === "expired" ? (
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground">Expirou</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30">Pendente</Badge>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
           {/* Mudar password */}
           <Card className="p-5 space-y-4">
-            <h3 className="text-sm font-semibold flex items-center gap-2">
+            <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground">
               <KeyRound className="w-4 h-4 text-primary" /> {t("profile.changePwd")}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -638,7 +784,7 @@ export default function ProfilePage() {
           {/* Zonas */}
           {zones && (
             <Card className="p-5">
-              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-foreground">
                 {t("profile.zones")}
                 <Tooltip2 text="Zonas de treino calculadas com base na tua FC máx, FC repouso e pace base." />
               </h3>
@@ -646,8 +792,8 @@ export default function ProfilePage() {
                 {(["z1","z2","z3","z4","z5"] as const).map((k, i) => (
                   <div key={k} className="flex items-center justify-between p-3 rounded-lg bg-muted/40 text-sm gap-2">
                     <Badge variant="outline" className="border-primary/40 text-primary">Z{i+1}</Badge>
-                    <span>{zones[k].hr_min}–{zones[k].hr_max} bpm</span>
-                    <span className="font-mono">{fmtPace(zones[k].pace_sec_per_km)} min/km</span>
+                    <span className="text-foreground">{zones[k].hr_min}–{zones[k].hr_max} bpm</span>
+                    <span className="font-mono text-foreground">{fmtPace(zones[k].pace_sec_per_km)} min/km</span>
                   </div>
                 ))}
               </div>
@@ -675,7 +821,7 @@ function MetricCard({ label, value, hint, tooltip }: { label: string; value: str
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
         {label}{tooltip && <Tooltip2 text={tooltip} />}
       </div>
-      <div className="text-2xl font-bold mt-1">{value}</div>
+      <div className="text-2xl font-bold mt-1 text-foreground">{value}</div>
       {hint && <div className="text-[11px] text-muted-foreground">{hint}</div>}
     </Card>
   );
