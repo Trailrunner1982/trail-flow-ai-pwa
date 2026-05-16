@@ -11,6 +11,7 @@ import { ImpersonationProvider } from "@/hooks/useImpersonation";
 import AuthPage from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import Onboarding from "./pages/Onboarding";
+import JoinPage from "./pages/Join";
 import CoachPage from "./pages/Coach";
 import RacesPage from "./pages/Races";
 import BiometricsPage from "./pages/Biometrics";
@@ -41,6 +42,7 @@ const App = () => (
               <Route path="/auth" element={<AuthPage />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/subscription-expired" element={<SubscriptionExpired />} />
+              <Route path="/join" element={<JoinPage />} />
               <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
               <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
                 <Route path="/dashboard" element={<DashboardPage />} />
