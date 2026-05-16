@@ -296,9 +296,13 @@ export default function ProfilePage() {
     if (!canWrite) return toast.error("Modo Espelho — leitura apenas");
     setSendingInvite(true);
     try {
-      const { data, error } = await supabase.functions.invoke("send-referral", {
-        body: { invited_email: inviteEmail.trim().toLowerCase() },
-      });
+      const { data: { session } } = await supabase.auth.getSession();
+const { data, error } = await supabase.functions.invoke("send-referral", {
+  body: { invited_email: inviteEmail.trim().toLowerCase() },
+  headers: {
+    Authorization: `Bearer ${session?.access_token}`,
+  },
+});
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
       toast.success(`Convite enviado para ${inviteEmail}! 🎉`);
