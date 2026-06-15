@@ -1,0 +1,32 @@
+name: Automatismo Anti-Pausa
+
+on:
+  schedule:
+    # Isto faz o script correr automaticamente às 08:00 de todas as Terças e Sextas-feiras
+    - cron: '0 8 * * 2,5'
+  workflow_dispatch: # Isto permite-te carregar num botão para testar manualmente quando quiseres
+
+jobs:
+  keep_alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Acordar o Supabase
+        run: |
+          curl -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/rpc/get_api_version" \
+          -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+
+      - name: 2. Descarregar o código do repositório
+        uses: actions/checkout@v4
+
+      - name: 3. Atualizar a data num ficheiro para o GitHub não adormecer
+        run: |
+          echo "Último ping em: $(date)" > .github/keep_alive.txt
+
+      - name: 4. Fazer o commit automático
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Bot"
+          git add .github/keep_alive.txt
+          git commit -m "chore: keep-alive ping [skip ci]" || exit 0
+          git push
