@@ -2,9 +2,12 @@ name: Automatismo Anti-Pausa
 
 on:
   schedule:
-    # Isto faz o script correr automaticamente às 08:00 de todas as Terças e Sextas-feiras
     - cron: '0 8 * * 2,5'
-  workflow_dispatch: # Isto permite-te carregar num botão para testar manualmente quando quiseres
+  workflow_dispatch:
+
+# Força o uso do Node 24 para evitar avisos de depreciação
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   keep_alive:
@@ -17,7 +20,7 @@ jobs:
           -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
 
       - name: 2. Descarregar o código do repositório
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # O env acima garante que corre bem em Node 24
 
       - name: 3. Atualizar a data num ficheiro para o GitHub não adormecer
         run: |
