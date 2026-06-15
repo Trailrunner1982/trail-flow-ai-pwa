@@ -5,10 +5,6 @@ on:
     - cron: '0 8 * * 2,5'
   workflow_dispatch:
 
-# Força o ambiente a usar Node 24 para eliminar o aviso de depreciação
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   keep_alive:
     runs-on: ubuntu-latest
@@ -20,7 +16,7 @@ jobs:
           -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
 
       - name: 2. Descarregar o código do repositório
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2 # Versão atualizada que já suporta nativamente o Node 24
 
       - name: 3. Atualizar a data num ficheiro para o GitHub não adormecer
         run: |
